@@ -10,20 +10,41 @@ import (
 	"os/signal"
 	"path/filepath"
 	"strings"
+	"sync"
 	"syscall"
 
+	routeclient "github.com/openshift/client-go/route/clientset/versioned"
+	operatorsv1alpha1 "github.com/operator-framework/api/pkg/operators/v1alpha1"
 	"github.com/project-ai-services/ai-services/internal/pkg/logger"
 	"github.com/project-ai-services/ai-services/internal/pkg/runtime/types"
 	corev1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	"k8s.io/apimachinery/pkg/runtime"
+	utilruntime "k8s.io/apimachinery/pkg/util/runtime"
 	"k8s.io/client-go/kubernetes"
+	clientgoscheme "k8s.io/client-go/kubernetes/scheme"
 	"k8s.io/client-go/rest"
 	"k8s.io/client-go/tools/clientcmd"
 	"k8s.io/client-go/util/homedir"
 	"sigs.k8s.io/controller-runtime/pkg/client"
-
-	routeclient "github.com/openshift/client-go/route/clientset/versioned"
 )
+
+var (
+	scheme = runtime.NewScheme()
+
+	// Singleton instances for all three clients, initialized together.
+	clientsOnce sync.Once
+	clientsErr  error
+
+	controllerRuntimeClient client.Client
+	kubeClient              *kubernetes.Clientset
+	routeClient             *routeclient.Clientset
+)
+
+func init() {
+	utilruntime.Must(clientgoscheme.AddToScheme(scheme))
+	utilruntime.Must(operatorsv1alpha1.AddToScheme(scheme))
+}
 
 const (
 	labelPartsCount = 2 // labelPartsCount is used to split label filters in the format "key=value".
@@ -38,41 +59,65 @@ type OpenshiftClient struct {
 	Ctx         context.Context
 }
 
-// NewOpenshiftClient creates and returns a new OpenshiftClient instance.
+// NewOpenshiftClient creates and returns an OpenshiftClient instance.
+// The underlying clients (Client, KubeClient, RouteClient) are reused across all instances.
 func NewOpenshiftClient() (*OpenshiftClient, error) {
 	return NewOpenshiftClientWithNamespace("default")
 }
 
-// NewOpenshiftClientWithNamespace creates a OpenshiftClient with a specific namespace.
+// NewOpenshiftClientWithNamespace creates an OpenshiftClient with a specific namespace.
+// The underlying clients (Client, KubeClient, RouteClient) are singletons and reused.
 func NewOpenshiftClientWithNamespace(namespace string) (*OpenshiftClient, error) {
-	config, err := getKubeConfig()
-	if err != nil {
-		return nil, fmt.Errorf("failed to get openshift config: %w", err)
-	}
-
-	kcc, err := client.New(config, client.Options{})
-	if err != nil {
+	// Initialize all three clients together (singleton pattern)
+	if err := initializeClients(); err != nil {
 		return nil, err
 	}
 
-	kc, err := kubernetes.NewForConfig(config)
-	if err != nil {
-		return nil, fmt.Errorf("failed to create openshift clientset: %w", err)
-	}
-
-	// OpenShift Route client
-	routeClient, err := routeclient.NewForConfig(config)
-	if err != nil {
-		return nil, fmt.Errorf("failed to create route clientset: %w", err)
-	}
-
 	return &OpenshiftClient{
-		Client:      kcc,
-		KubeClient:  kc,
+		Client:      controllerRuntimeClient,
+		KubeClient:  kubeClient,
 		RouteClient: routeClient,
 		Namespace:   namespace,
 		Ctx:         context.Background(),
 	}, nil
+}
+
+// initializeClients initializes all three clients once using sync.Once.
+func initializeClients() error {
+	clientsOnce.Do(func() {
+		config, err := getKubeConfig()
+		if err != nil {
+			clientsErr = fmt.Errorf("failed to get openshift config: %w", err)
+
+			return
+		}
+
+		// Initialize controller-runtime client
+		controllerRuntimeClient, err = client.New(config, client.Options{Scheme: scheme})
+		if err != nil {
+			clientsErr = fmt.Errorf("failed to create controller-runtime client: %w", err)
+
+			return
+		}
+
+		// Initialize Kubernetes clientset
+		kubeClient, err = kubernetes.NewForConfig(config)
+		if err != nil {
+			clientsErr = fmt.Errorf("failed to create openshift clientset: %w", err)
+
+			return
+		}
+
+		// Initialize OpenShift Route client
+		routeClient, err = routeclient.NewForConfig(config)
+		if err != nil {
+			clientsErr = fmt.Errorf("failed to create openshift route clientset: %w", err)
+
+			return
+		}
+	})
+
+	return clientsErr
 }
 
 // getKubeConfig attempts to get openshift config from in-cluster or kubeconfig file.
@@ -157,7 +202,8 @@ func (kc *OpenshiftClient) InspectPod(nameOrID string) (*types.Pod, error) {
 
 	pod := &corev1.Pod{}
 	err = kc.Client.Get(kc.Ctx, client.ObjectKey{
-		Name: podName,
+		Name:      podName,
+		Namespace: kc.Namespace,
 	}, pod)
 	if err != nil {
 		return nil, fmt.Errorf("failed to get pod from cluster: %w", err)
@@ -179,14 +225,14 @@ func (kc *OpenshiftClient) PodExists(nameOrID string) (bool, error) {
 
 // StopPod stops a pod.
 func (kc *OpenshiftClient) StopPod(id string) error {
-	logger.Infof("not implemented")
+	logger.Warningf("Unsupported for openshift runtime")
 
 	return nil
 }
 
 // StartPod starts a pod.
 func (kc *OpenshiftClient) StartPod(id string) error {
-	logger.Warningf("not implemented")
+	logger.Warningf("Unsupported for openshift runtime")
 
 	return nil
 }
@@ -223,7 +269,7 @@ func (kc *OpenshiftClient) InspectContainer(nameOrID string) (*types.Container, 
 
 	for _, pod := range pods.Items {
 		for _, cs := range pod.Status.ContainerStatuses {
-			if cs.Name == nameOrID {
+			if cs.ContainerID == nameOrID || cs.Name == nameOrID {
 				return toOpenShiftContainer(&cs, &pod), nil
 			}
 		}
@@ -281,13 +327,36 @@ func (kc *OpenshiftClient) ContainerLogs(containerNameOrID string) error {
 	return fmt.Errorf("cannot find pod for the given container")
 }
 
-func (kc *OpenshiftClient) GetRoute(nameOrID string) (*types.Route, error) {
-	r, err := kc.RouteClient.RouteV1().Routes(kc.Namespace).Get(kc.Ctx, nameOrID, metav1.GetOptions{})
+// ListRoutes lists all routes in the namespace.
+func (kc *OpenshiftClient) ListRoutes() ([]types.Route, error) {
+	routeList, err := kc.RouteClient.RouteV1().Routes(kc.Namespace).List(kc.Ctx, metav1.ListOptions{})
 	if err != nil {
-		return nil, fmt.Errorf("cannot find route: %w", err)
+		return nil, fmt.Errorf("failed to list routes: %w", err)
 	}
 
-	return toOpenShiftRoute(r), nil
+	return toOpenShiftRouteList(routeList.Items), nil
+}
+
+// DeletePVCs deletes all PVCs matching the given application label.
+func (kc *OpenshiftClient) DeletePVCs(appLabel string) error {
+	pvcs, err := kc.KubeClient.CoreV1().PersistentVolumeClaims(kc.Namespace).List(kc.Ctx, metav1.ListOptions{
+		LabelSelector: appLabel,
+	})
+	if err != nil {
+		return fmt.Errorf("failed to list PVCs for cleanup: %w", err)
+	}
+
+	for _, pvc := range pvcs.Items {
+		if err := kc.KubeClient.CoreV1().PersistentVolumeClaims(kc.Namespace).Delete(kc.Ctx, pvc.Name, metav1.DeleteOptions{}); err != nil {
+			logger.Warningf("Failed to delete PVC '%s': %v\n", pvc.Name, err)
+
+			continue
+		}
+
+		logger.Infof("Deleted PVC '%s'\n", pvc.Name, logger.VerbosityLevelDebug)
+	}
+
+	return nil
 }
 
 // Type returns the runtime type.
@@ -296,22 +365,18 @@ func (kc *OpenshiftClient) Type() types.RuntimeType {
 }
 
 func getPodNameWithPrefix(kc *OpenshiftClient, nameOrID string) (string, error) {
-	podName := ""
 	pods, err := kc.ListPods(nil)
 	if err != nil {
 		return "", fmt.Errorf("failed to list pods: %w", err)
 	}
 
 	for _, pod := range pods {
-		if strings.HasPrefix(pod.Name, nameOrID) {
-			podName = pod.Name
+		if pod.ID == nameOrID || strings.HasPrefix(pod.Name, nameOrID) {
+			return pod.Name, nil
 		}
 	}
-	if podName == "" {
-		return "", fmt.Errorf("cannot find pod: %s", nameOrID)
-	}
 
-	return podName, nil
+	return "", fmt.Errorf("cannot find pod: %s", nameOrID)
 }
 
 func followLogs(kc *OpenshiftClient, podName string, opts *corev1.PodLogOptions) error {
