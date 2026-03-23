@@ -37,14 +37,6 @@ spec:
       env:
         - name: VLLM_CPU_KVCACHE_SPACE
           value: "20"
-        {{- /* Check if .env.instruct exists and is a non-empty map */}}
-        {{- with .env.instruct }}
-          {{- /* If it does, '.' (dot) is now scoped to .env.instruct */}}
-          {{- range $k, $v := . }}
-        - name: {{ $k }}
-          value: "{{ $v }}"
-          {{- end }}
-        {{- end }}
       resources:
         requests:
           memory: "100Gi"
@@ -101,14 +93,6 @@ spec:
       env:
         - name: OMP_NUM_THREADS
           value: "8"
-        {{- /* Check if .env.reranker exists and is a non-empty map */}}
-        {{- with .env.reranker }}
-          {{- /* If it does, '.' (dot) is now scoped to .env.reranker */}}
-          {{- range $k, $v := . }}
-        - name: {{ $k }}
-          value: "{{ $v }}"
-          {{- end }}
-        {{- end }}
       resources:
         requests:
           memory: "5Gi"
