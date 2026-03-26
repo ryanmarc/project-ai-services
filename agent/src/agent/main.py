@@ -82,7 +82,7 @@ def run_cli(settings: Settings) -> None:
 
 def run_server(settings: Settings) -> None:
     """Start the A2A protocol server."""
-    from a2a.server.apps.starlette import A2AStarletteApplication
+    from a2a.server.apps import A2AStarletteApplication
     from a2a.server.request_handlers import DefaultRequestHandler
 
     from agent.a2a.agent_card import build_agent_card
