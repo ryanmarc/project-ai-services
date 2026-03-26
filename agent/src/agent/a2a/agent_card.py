@@ -14,6 +14,8 @@ def build_agent_card(host: str = "0.0.0.0", port: int = 9000) -> AgentCard:
         url=f"http://{host}:{port}",
         version="0.1.0",
         capabilities=AgentCapabilities(streaming=True),
+        defaultInputModes=["text"],
+        defaultOutputModes=["text"],
         skills=[
             AgentSkill(
                 id="summarize",
