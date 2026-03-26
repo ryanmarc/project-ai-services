@@ -3,7 +3,7 @@
 import logging
 from collections.abc import AsyncIterator
 
-from a2a.server.agent_execution import AgentExecution
+from a2a.server.agent_execution import AgentExecutor
 from a2a.server.events import EventQueue
 from a2a.types import (
     FilePart,
@@ -35,7 +35,7 @@ def _extract_user_text(message: Message) -> str:
     return "\n".join(texts) if texts else ""
 
 
-class AgentTaskHandler(AgentExecution):
+class AgentTaskHandler(AgentExecutor):
     """Bridges A2A protocol tasks to the agent loop."""
 
     def __init__(
