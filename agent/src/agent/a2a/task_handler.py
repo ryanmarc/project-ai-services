@@ -3,9 +3,9 @@
 import logging
 from collections.abc import AsyncIterator
 
-from a2a_sdk.server.agent_execution import AgentExecution
-from a2a_sdk.server.events import EventQueue
-from a2a_sdk.types import (
+from a2a.server.agent_execution import AgentExecution
+from a2a.server.events import EventQueue
+from a2a.types import (
     FilePart,
     Message,
     Part,
@@ -14,7 +14,7 @@ from a2a_sdk.types import (
     TaskState,
     TextPart,
 )
-from a2a_sdk.utils import new_agent_text_message
+from a2a.utils import new_agent_text_message
 
 from agent.llm.base import LLMProvider
 from agent.loop import run_agent, run_agent_stream
