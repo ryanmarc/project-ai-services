@@ -12,7 +12,7 @@ import (
 )
 
 // ListImages returns the list of images required for given application template.
-func ListImages(template, appName string) ([]string, error) {
+func ListImages(template, appName string, valuesFiles []string, cliOverrides map[string]string) ([]string, error) {
 	tp := templates.NewEmbedTemplateProvider(templates.EmbedOptions{})
 
 	// fetch list of app templates
@@ -37,7 +37,7 @@ func ListImages(template, appName string) ([]string, error) {
 
 	// fetch all the images required for the given template by looping over each of the pod template files
 	for _, tmpl := range tmpls {
-		ps, err := tp.LoadPodTemplateWithValues(template, tmpl.Name(), appName, nil, nil)
+		ps, err := tp.LoadPodTemplateWithValues(template, tmpl.Name(), appName, valuesFiles, cliOverrides)
 		if err != nil {
 			return nil, fmt.Errorf("error loading pod template: %w", err)
 		}

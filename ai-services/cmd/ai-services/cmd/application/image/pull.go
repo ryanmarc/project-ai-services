@@ -32,7 +32,7 @@ func pull(template string) error {
 		return nil
 	}
 
-	images, err := image.ListImages(template, "")
+	images, err := image.ListImages(template, "", nil, nil)
 	if err != nil {
 		return fmt.Errorf("error listing images: %w", err)
 	}

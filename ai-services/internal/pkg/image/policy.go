@@ -27,15 +27,19 @@ type ImagePull struct {
 	Runtime          runtime.Runtime
 	Policy           ImagePullPolicy
 	App, AppTemplate string
+	ValuesFiles      []string
+	CliOverrides     map[string]string
 }
 
 // NewImagePull factory method to return ImagePull object.
-func NewImagePull(runtime runtime.Runtime, policy ImagePullPolicy, app, appTemplate string) *ImagePull {
+func NewImagePull(runtime runtime.Runtime, policy ImagePullPolicy, app, appTemplate string, valuesFiles []string, cliOverrides map[string]string) *ImagePull {
 	return &ImagePull{
-		Runtime:     runtime,
-		Policy:      policy,
-		App:         app,
-		AppTemplate: appTemplate,
+		Runtime:      runtime,
+		Policy:       policy,
+		App:          app,
+		AppTemplate:  appTemplate,
+		ValuesFiles:  valuesFiles,
+		CliOverrides: cliOverrides,
 	}
 }
 
@@ -56,7 +60,7 @@ func (p ImagePull) Run() error {
 // always -> pulls all the images for a given app template.
 func (p ImagePull) always() error {
 	// Fetch all images required for a given template
-	images, err := ListImages(p.AppTemplate, p.App)
+	images, err := ListImages(p.AppTemplate, p.App, p.ValuesFiles, p.CliOverrides)
 	if err != nil {
 		return fmt.Errorf("failed to list container images: %w", err)
 	}
@@ -71,7 +75,7 @@ func (p ImagePull) always() error {
 // ifNotPresent -> pulls only the missing images for a given app template.
 func (p ImagePull) ifNotPresent() error {
 	// Fetch all images required for a given template
-	images, err := ListImages(p.AppTemplate, p.App)
+	images, err := ListImages(p.AppTemplate, p.App, p.ValuesFiles, p.CliOverrides)
 	if err != nil {
 		return fmt.Errorf("failed to list container images: %w", err)
 	}
@@ -90,7 +94,7 @@ func (p ImagePull) ifNotPresent() error {
 // It checks whether all the images for given appTemplate is present locally, if not then raises an error.
 func (p ImagePull) never() error {
 	// Fetch all images required for a given template
-	images, err := ListImages(p.AppTemplate, p.App)
+	images, err := ListImages(p.AppTemplate, p.App, p.ValuesFiles, p.CliOverrides)
 	if err != nil {
 		return fmt.Errorf("failed to list container images: %w", err)
 	}
