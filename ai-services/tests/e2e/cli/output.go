@@ -398,6 +398,11 @@ func ValidateModelDownloadOutput(output string, templateName string) error {
 
 func ValidateApplicationsTemplateCommandOutput(output string) error {
 	requiredOutputs := map[string][]string{
+		"agent": {
+			"Description: AI Agent application that provides A2A (Agent-to-Agent) protocol support with summarization capabilities powered by a large language model.",
+			"summarize.port:  Host port for the Summarize API. If unspecified, a random available port is assigned. Specify a port number to use a custom value.",
+			"agent.port:  Host port for the AI Agent (A2A protocol). If unspecified, a random available port is assigned. Specify a port number to use a custom value.",
+		},
 		"rag": {
 			"Description: Retrieval Augmented Generation (RAG) application that combines a vector database, a large language model, and a retrieval mechanism to provide accurate and context-aware responses based on ingested documents.",
 			"ui.port:  Host port for the RAG UI. If unspecified, a random available port is assigned. Specify a port number to use a custom value.",
