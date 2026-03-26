@@ -84,6 +84,7 @@ def run_server(settings: Settings) -> None:
     """Start the A2A protocol server."""
     from a2a.server.apps import A2AStarletteApplication
     from a2a.server.request_handlers import DefaultRequestHandler
+    from a2a.server.tasks import InMemoryTaskStore
 
     from agent.a2a.agent_card import build_agent_card
     from agent.a2a.task_handler import AgentTaskHandler
@@ -95,8 +96,10 @@ def run_server(settings: Settings) -> None:
     task_handler = AgentTaskHandler(
         llm=llm, registry=registry, max_iterations=settings.max_tool_iterations
     )
+    task_store = InMemoryTaskStore()
     request_handler = DefaultRequestHandler(
         agent_executor=task_handler,
+        task_store=task_store,
     )
 
     app = A2AStarletteApplication(
