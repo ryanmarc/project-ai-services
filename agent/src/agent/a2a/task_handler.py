@@ -1,6 +1,8 @@
 """A2A TaskHandler bridging the protocol to the agent loop."""
 
+import asyncio
 import logging
+from functools import partial
 
 from a2a.server.agent_execution import AgentExecutor, RequestContext
 from a2a.server.events import EventQueue
@@ -40,8 +42,13 @@ class AgentTaskHandler(AgentExecutor):
         logger.info("A2A task received: %s", user_text[:100])
 
         try:
-            result = run_agent(
-                user_text, self._llm, self._registry, self._max_iterations
+            loop = asyncio.get_running_loop()
+            result = await loop.run_in_executor(
+                None,
+                partial(
+                    run_agent,
+                    user_text, self._llm, self._registry, self._max_iterations,
+                ),
             )
             event_queue.enqueue_event(new_agent_text_message(result))
             event_queue.enqueue_event(TaskState.completed)
