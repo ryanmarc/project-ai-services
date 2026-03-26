@@ -1,6 +1,6 @@
 """Agent Card definition for A2A protocol discovery."""
 
-from a2a.types import AgentCard, AgentCapabilities, AgentSkill
+from a2a_sdk.types import AgentCard, AgentCapabilities, AgentSkill
 
 
 def build_agent_card(host: str = "0.0.0.0", port: int = 9000) -> AgentCard:
