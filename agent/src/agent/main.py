@@ -97,7 +97,6 @@ def run_server(settings: Settings) -> None:
     )
     request_handler = DefaultRequestHandler(
         agent_executor=task_handler,
-        agent_card=agent_card,
     )
 
     app = A2AStarletteApplication(
