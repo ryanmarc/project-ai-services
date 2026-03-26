@@ -1,0 +1,6 @@
+name: agent
+version: 0.0.1
+description: "AI Agent application that provides A2A (Agent-to-Agent) protocol support with summarization capabilities powered by a large language model."
+podTemplateExecutions:
+  - [vllm-server.yaml.tmpl]
+  - [summarize-api.yaml.tmpl, agent.yaml.tmpl]

@@ -1,0 +1,23 @@
+pods:
+  - name: "{{ .AppName }}--agent"
+    format: "index .Ports \"9000/tcp\" 0"
+    default: ""
+    alias: AGENT_PORT
+
+  - name: "{{ .AppName }}--summarize-api"
+    format: "index .Ports \"6000/tcp\" 0"
+    default: ""
+    alias: SUMMARIZE_API_PORT
+
+containers:
+  - name: "{{ .AppName }}--agent-agent"
+    format: ".Status"
+    alias: AGENT_STATUS
+
+  - name: "{{ .AppName }}--summarize-api-summarize-api"
+    format: ".Status"
+    alias: SUMMARIZE_API_STATUS
+
+hosts:
+  - fetch: HOST_IP
+    type: ip
