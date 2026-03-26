@@ -1,0 +1,135 @@
+"""Core agent loop: prompt -> LLM -> tool calls -> result."""
+
+import json
+import logging
+from typing import Any, Iterator
+
+from agent.llm.base import LLMProvider
+from agent.tools.base import ToolRegistry
+
+logger = logging.getLogger(__name__)
+
+SYSTEM_PROMPT = (
+    "You are a helpful AI assistant with access to tools. "
+    "Use the available tools to answer the user's request. "
+    "When you have the final answer, respond directly without calling tools."
+)
+
+
+def _extract_tool_calls(message: dict[str, Any]) -> list[dict[str, Any]]:
+    """Extract tool calls from an assistant message."""
+    return message.get("tool_calls") or []
+
+
+def _execute_tool_calls(
+    tool_calls: list[dict[str, Any]], registry: ToolRegistry
+) -> list[dict[str, str]]:
+    """Execute tool calls and return tool response messages."""
+    results = []
+    for call in tool_calls:
+        tool_name = call["function"]["name"]
+        call_id = call.get("id", "")
+        raw_args = call["function"].get("arguments", "{}")
+
+        try:
+            arguments = json.loads(raw_args) if isinstance(raw_args, str) else raw_args
+        except json.JSONDecodeError as e:
+            results.append({
+                "role": "tool",
+                "tool_call_id": call_id,
+                "content": f"Error parsing arguments: {e}",
+            })
+            continue
+
+        tool = registry.get(tool_name)
+        if tool is None:
+            results.append({
+                "role": "tool",
+                "tool_call_id": call_id,
+                "content": f"Error: unknown tool '{tool_name}'",
+            })
+            continue
+
+        try:
+            result = tool.execute(arguments)
+        except Exception as e:
+            logger.exception("Tool %s execution failed", tool_name)
+            result = f"Error executing {tool_name}: {e}"
+
+        results.append({
+            "role": "tool",
+            "tool_call_id": call_id,
+            "content": result,
+        })
+    return results
+
+
+def run_agent(
+    user_input: str,
+    llm: LLMProvider,
+    registry: ToolRegistry,
+    max_iterations: int = 5,
+) -> str:
+    """Run the agent loop (non-streaming). Returns the final text response."""
+    messages: list[dict[str, Any]] = [
+        {"role": "system", "content": SYSTEM_PROMPT},
+        {"role": "user", "content": user_input},
+    ]
+    tools = registry.all_schemas() or None
+
+    for i in range(max_iterations):
+        logger.debug("Agent loop iteration %d/%d", i + 1, max_iterations)
+        response = llm.chat_completion(messages, tools=tools)
+        choice = response["choices"][0]
+        assistant_msg = choice["message"]
+
+        tool_calls = _extract_tool_calls(assistant_msg)
+        if not tool_calls:
+            return assistant_msg.get("content", "") or ""
+
+        messages.append(assistant_msg)
+        tool_results = _execute_tool_calls(tool_calls, registry)
+        messages.extend(tool_results)
+
+    return "I was unable to complete your request within the allowed number of steps."
+
+
+def run_agent_stream(
+    user_input: str,
+    llm: LLMProvider,
+    registry: ToolRegistry,
+    max_iterations: int = 5,
+) -> Iterator[str]:
+    """Run the agent loop, streaming the final LLM response."""
+    messages: list[dict[str, Any]] = [
+        {"role": "system", "content": SYSTEM_PROMPT},
+        {"role": "user", "content": user_input},
+    ]
+    tools = registry.all_schemas() or None
+
+    for i in range(max_iterations):
+        logger.debug("Agent stream loop iteration %d/%d", i + 1, max_iterations)
+
+        # Use non-streaming for tool-calling iterations
+        response = llm.chat_completion(messages, tools=tools)
+        choice = response["choices"][0]
+        assistant_msg = choice["message"]
+
+        tool_calls = _extract_tool_calls(assistant_msg)
+        if not tool_calls:
+            # Final iteration — re-do as streaming for the answer
+            # Remove the non-streaming response and stream instead
+            for chunk in llm.chat_completion_stream(messages, tools=tools):
+                choices = chunk.get("choices", [])
+                if choices:
+                    delta = choices[0].get("delta", {})
+                    content = delta.get("content", "")
+                    if content:
+                        yield content
+            return
+
+        messages.append(assistant_msg)
+        tool_results = _execute_tool_calls(tool_calls, registry)
+        messages.extend(tool_results)
+
+    yield "I was unable to complete your request within the allowed number of steps."
