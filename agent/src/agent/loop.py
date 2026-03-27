@@ -10,10 +10,11 @@ from agent.tools.base import ToolRegistry
 logger = logging.getLogger(__name__)
 
 SYSTEM_PROMPT = (
-    "You are a helpful AI assistant with access to tools. "
-    "You MUST use the available tools to fulfill the user's request. "
-    "Do NOT attempt to answer directly — always call a tool first. "
-    "After receiving the tool result, present it to the user."
+    "You are a helpful AI assistant with access to the following tools. "
+    "When a tool is required to answer the user's query, respond only with "
+    "<|tool_call|> followed by a JSON list of tools used. "
+    "If a tool does not exist in the provided list of tools, notify the user "
+    "that you do not have the ability to fulfill the request."
 )
 
 
