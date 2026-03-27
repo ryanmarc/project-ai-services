@@ -87,12 +87,7 @@ def run_agent(
 
     for i in range(max_iterations):
         logger.debug("Agent loop iteration %d/%d: calling LLM", i + 1, max_iterations)
-        # On first iteration, force tool use; after that, let LLM respond freely
-        if i == 0 and tools:
-            tool_choice = {"type": "function", "function": {"name": tools[0]["function"]["name"]}}
-        else:
-            tool_choice = None
-        response = llm.chat_completion(messages, tools=tools, tool_choice=tool_choice)
+        response = llm.chat_completion(messages, tools=tools)
         choice = response["choices"][0]
         assistant_msg = choice["message"]
         finish_reason = choice.get("finish_reason", "unknown")
