@@ -37,6 +37,9 @@ RUN dnf install -y \
         make \
         numactl-devel \
         openblas-devel \
+        openssl-devel \
+        libffi-devel \
+        zlib-devel \
     && dnf clean all
 
 # Activate gcc-toolset-14 for the entire build
