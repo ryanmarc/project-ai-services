@@ -1,0 +1,13 @@
+# Python dependencies for vLLM on IBM Power (ppc64le)
+# Sourced from: https://community.ibm.com/community/user/blogs/maryam-nezamabadi/2026/02/09/set-up-and-run-vllm-on-ibm-power
+#
+# These are installed with --extra-index-url=https://wheels.developerfirst.ibm.com/ppc64le/linux
+# to pull pre-built ppc64le wheels.
+
+torch==2.8.0
+torchaudio==2.8.0
+torchvision==0.23.0
+grpcio==1.76.0
+h5py==3.13.0
+pyarrow==19.0.0
+scipy==1.15.3

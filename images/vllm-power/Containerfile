@@ -1,0 +1,113 @@
+# vLLM CPU image for IBM Power (ppc64le)
+#
+# Based on:
+#   https://community.ibm.com/community/user/blogs/maryam-nezamabadi/2026/02/09/set-up-and-run-vllm-on-ibm-power
+#
+# Produces a drop-in replacement for: icr.io/ppc64le-oss/vllm-ppc64le
+#
+# Build:
+#   podman build -t localhost/vllm-ppc64le:dev .
+#
+# Run:
+#   podman run --rm -v /var/lib/ai-services/models:/models:Z -p 8000:8000 \
+#     localhost/vllm-ppc64le:dev \
+#     vllm serve /models/ibm-granite/granite-3.3-8b-instruct \
+#       --dtype bfloat16 --max-model-len 8192 --port 8000
+
+ARG BASE_IMAGE=registry.access.redhat.com/ubi9/ubi:latest
+ARG VLLM_VERSION=v0.11.1
+ARG PYTHON_VERSION=3.12
+
+# ---------------------------------------------------------------------------
+# Stage 1: Build vLLM from source
+# ---------------------------------------------------------------------------
+FROM ${BASE_IMAGE} AS builder
+
+ARG VLLM_VERSION
+ARG PYTHON_VERSION
+
+# Install system dependencies including gcc-toolset-14
+RUN dnf install -y \
+        gcc-toolset-14 \
+        python${PYTHON_VERSION} \
+        python${PYTHON_VERSION}-devel \
+        python${PYTHON_VERSION}-pip \
+        git \
+        cmake \
+        make \
+        numactl-devel \
+        openblas-devel \
+    && dnf clean all
+
+# Activate gcc-toolset-14 for the entire build
+ENV PATH="/opt/rh/gcc-toolset-14/root/usr/bin:${PATH}" \
+    CC=/opt/rh/gcc-toolset-14/root/usr/bin/gcc \
+    CXX=/opt/rh/gcc-toolset-14/root/usr/bin/g++ \
+    LD_LIBRARY_PATH="/opt/rh/gcc-toolset-14/root/usr/lib64:/opt/rh/gcc-toolset-14/root/usr/lib${LD_LIBRARY_PATH:+:$LD_LIBRARY_PATH}"
+
+# Create and activate virtual environment
+RUN python${PYTHON_VERSION} -m venv /opt/vllm-venv
+ENV VIRTUAL_ENV=/opt/vllm-venv \
+    PATH="/opt/vllm-venv/bin:${PATH}"
+
+RUN pip install --upgrade pip setuptools wheel
+
+# Install Python dependencies from IBM Power wheels repository
+COPY requirements.txt /tmp/requirements.txt
+RUN pip install --prefer-binary \
+        -r /tmp/requirements.txt \
+        --extra-index-url=https://wheels.developerfirst.ibm.com/ppc64le/linux
+
+# Set library paths for the build
+ENV SITE_PACKAGE_PATH="/opt/vllm-venv/lib64/python${PYTHON_VERSION}/site-packages" \
+    VLLM_TARGET_DEVICE=cpu
+
+ENV LD_LIBRARY_PATH="${SITE_PACKAGE_PATH}/libprotobuf/lib64:${SITE_PACKAGE_PATH}/openblas/lib:${SITE_PACKAGE_PATH}:${SITE_PACKAGE_PATH}/ffmpeg/lib:${SITE_PACKAGE_PATH}/libvpx/lib:${SITE_PACKAGE_PATH}/lame/lib:${LD_LIBRARY_PATH}" \
+    CMAKE_PREFIX_PATH="${SITE_PACKAGE_PATH}/libprotobuf:${CMAKE_PREFIX_PATH}"
+
+# Clone and build vLLM
+RUN git clone --depth 1 --branch ${VLLM_VERSION} https://github.com/vllm-project/vllm.git /tmp/vllm
+
+WORKDIR /tmp/vllm
+
+RUN pip install -r requirements/common.txt \
+        --extra-index-url=https://wheels.developerfirst.ibm.com/ppc64le/linux
+
+RUN VLLM_TARGET_DEVICE=cpu python3 setup.py install
+
+# ---------------------------------------------------------------------------
+# Stage 2: Runtime image (smaller)
+# ---------------------------------------------------------------------------
+FROM ${BASE_IMAGE} AS runtime
+
+ARG PYTHON_VERSION=3.12
+
+RUN dnf install -y \
+        python${PYTHON_VERSION} \
+        numactl \
+        openblas \
+        gcc-toolset-14-runtime \
+        gcc-toolset-14-libstdc++-devel \
+    && dnf clean all
+
+# Copy the entire venv from the builder
+COPY --from=builder /opt/vllm-venv /opt/vllm-venv
+
+ENV VIRTUAL_ENV=/opt/vllm-venv \
+    PATH="/opt/vllm-venv/bin:${PATH}" \
+    SITE_PACKAGE_PATH="/opt/vllm-venv/lib64/python${PYTHON_VERSION}/site-packages"
+
+# Runtime library paths
+ENV LD_LIBRARY_PATH="${SITE_PACKAGE_PATH}/libprotobuf/lib64:${SITE_PACKAGE_PATH}/openblas/lib:${SITE_PACKAGE_PATH}:${SITE_PACKAGE_PATH}/ffmpeg/lib:${SITE_PACKAGE_PATH}/libvpx/lib:${SITE_PACKAGE_PATH}/lame/lib:/opt/rh/gcc-toolset-14/root/usr/lib64" \
+    PATH="/opt/rh/gcc-toolset-14/root/usr/bin:${PATH}"
+
+# vLLM CPU defaults
+ENV VLLM_CPU_KVCACHE_SPACE=40 \
+    VLLM_CPU_OMP_THREADS_BIND="auto" \
+    PYTHONUNBUFFERED=1
+
+EXPOSE 8000
+
+# Default entrypoint matches what the ai-services templates expect
+ENTRYPOINT ["/bin/sh", "-c"]
+CMD ["vllm serve --help"]
