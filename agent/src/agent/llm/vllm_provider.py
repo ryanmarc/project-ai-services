@@ -47,7 +47,7 @@ class VLLMProvider(LLMProvider):
         if tool_choice is not None:
             payload["tool_choice"] = tool_choice
 
-        logger.debug("vLLM request payload: %s", json.dumps(payload, default=str)[:2000])
+        logger.debug("vLLM request payload: %s", json.dumps(payload, default=str)[:4000])
         response = session.post(
             f"{self._endpoint}/v1/chat/completions",
             json=payload,
