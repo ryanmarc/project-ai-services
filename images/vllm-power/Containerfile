@@ -40,6 +40,9 @@ RUN dnf install -y \
         openssl-devel \
         libffi-devel \
         zlib-devel \
+        libatomic \
+        rust \
+        cargo \
     && dnf clean all
 
 # Activate gcc-toolset-14 for the entire build
