@@ -11,33 +11,65 @@ from agent.llm.base import LLMProvider
 logger = logging.getLogger(__name__)
 
 
+_GRANITE_TOOL_SYSTEM = (
+    "Knowledge Cutoff Date: April 2024.\n"
+    "Today's Date: {today}.\n"
+    "You are Granite, developed by IBM. You are a helpful assistant with "
+    "access to the following tools. When a tool is required to answer the "
+    "user's query, respond only with <|tool_call|> followed by a JSON list "
+    "of tools used. If a tool does not exist in the provided list of tools, "
+    "notify the user that you do not have the ability to fulfill the request."
+)
+
+
 def _render_granite_prompt(
     messages: list[dict[str, Any]],
     tools: list[dict[str, Any]],
 ) -> str:
-    """Render messages and tools into a Granite 3.3 prompt string."""
+    """Render messages and tools into a Granite 3.3 prompt string.
+
+    Matches the output of the Granite 3.3 tokenizer chat template exactly:
+    system (with tool instruction) -> available_tools -> messages -> generation prompt.
+    """
+    from datetime import date
+
     parts: list[str] = []
 
-    # Inject tool definitions
-    parts.append("<|start_of_role|>available_tools<|end_of_role|>")
-    parts.append(json.dumps(tools))
-    parts.append("<|end_of_text|>")
+    # System message first (matching Granite template ordering)
+    has_system = any(m["role"] == "system" for m in messages)
+    if not has_system:
+        today = date.today().strftime("%B %d, %Y")
+        parts.append(
+            "<|start_of_role|>system<|end_of_role|>"
+            + _GRANITE_TOOL_SYSTEM.format(today=today)
+            + "<|end_of_text|>"
+        )
+
+    # Tool definitions (pretty-printed to match template output)
+    parts.append(
+        "<|start_of_role|>available_tools<|end_of_role|>"
+        + json.dumps(tools, indent=4)
+        + "<|end_of_text|>"
+    )
 
     for msg in messages:
         role = msg["role"]
 
         if role == "system":
-            parts.append("<|start_of_role|>system<|end_of_role|>")
-            parts.append(msg["content"])
-            parts.append("<|end_of_text|>")
+            parts.append(
+                "<|start_of_role|>system<|end_of_role|>"
+                + msg["content"]
+                + "<|end_of_text|>"
+            )
 
         elif role == "user":
-            parts.append("<|start_of_role|>user<|end_of_role|>")
-            parts.append(msg["content"])
-            parts.append("<|end_of_text|>")
+            parts.append(
+                "<|start_of_role|>user<|end_of_role|>"
+                + msg["content"]
+                + "<|end_of_text|>"
+            )
 
         elif role == "assistant":
-            parts.append("<|start_of_role|>assistant<|end_of_role|>")
             tool_calls = msg.get("tool_calls") or []
             if tool_calls:
                 tc_list = []
@@ -46,16 +78,25 @@ def _render_granite_prompt(
                     raw_args = fn.get("arguments", "{}")
                     args = json.loads(raw_args) if isinstance(raw_args, str) else raw_args
                     tc_list.append({"name": fn["name"], "arguments": args})
-                parts.append("<|tool_call|>")
-                parts.append(json.dumps(tc_list))
-            elif msg.get("content"):
-                parts.append(msg["content"])
-            parts.append("<|end_of_text|>")
+                parts.append(
+                    "<|start_of_role|>assistant<|end_of_role|>"
+                    + "<|tool_call|>"
+                    + json.dumps(tc_list)
+                    + "<|end_of_text|>"
+                )
+            else:
+                parts.append(
+                    "<|start_of_role|>assistant<|end_of_role|>"
+                    + (msg.get("content") or "")
+                    + "<|end_of_text|>"
+                )
 
         elif role == "tool":
-            parts.append("<|start_of_role|>tool_response<|end_of_role|>")
-            parts.append(msg["content"])
-            parts.append("<|end_of_text|>")
+            parts.append(
+                "<|start_of_role|>tool_response<|end_of_role|>"
+                + msg["content"]
+                + "<|end_of_text|>"
+            )
 
     # Generation prompt
     parts.append("<|start_of_role|>assistant<|end_of_role|>")
