@@ -11,8 +11,9 @@ logger = logging.getLogger(__name__)
 
 SYSTEM_PROMPT = (
     "You are a helpful AI assistant with access to tools. "
-    "Use the available tools to answer the user's request. "
-    "When you have the final answer, respond directly without calling tools."
+    "You MUST use the available tools to fulfill the user's request. "
+    "Do NOT attempt to answer directly — always call a tool first. "
+    "After receiving the tool result, present it to the user."
 )
 
 
