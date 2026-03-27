@@ -55,6 +55,11 @@ ENV VIRTUAL_ENV=/opt/vllm-venv \
 
 RUN pip install --upgrade pip setuptools wheel
 
+# Tell grpcio to use system OpenSSL/zlib instead of bundled BoringSSL
+# (BoringSSL does not compile on ppc64le)
+ENV GRPC_PYTHON_BUILD_SYSTEM_OPENSSL=1 \
+    GRPC_PYTHON_BUILD_SYSTEM_ZLIB=1
+
 # Install Python dependencies from IBM Power wheels repository
 COPY requirements.txt /tmp/requirements.txt
 RUN pip install --prefer-binary \
