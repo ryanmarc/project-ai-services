@@ -79,7 +79,6 @@ def run_agent(
 ) -> str:
     """Run the agent loop (non-streaming). Returns the final text response."""
     messages: list[dict[str, Any]] = [
-        {"role": "system", "content": SYSTEM_PROMPT},
         {"role": "user", "content": user_input},
     ]
     tools = registry.all_schemas() or None
@@ -118,7 +117,6 @@ def run_agent_stream(
 ) -> Iterator[str]:
     """Run the agent loop, streaming the final LLM response."""
     messages: list[dict[str, Any]] = [
-        {"role": "system", "content": SYSTEM_PROMPT},
         {"role": "user", "content": user_input},
     ]
     tools = registry.all_schemas() or None
