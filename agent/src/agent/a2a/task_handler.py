@@ -33,10 +33,10 @@ class AgentTaskHandler(AgentExecutor):
         """Handle a non-streaming A2A task (message/send)."""
         user_text = context.get_user_input()
         if not user_text:
-            event_queue.enqueue_event(
+            await event_queue.enqueue_event(
                 new_agent_text_message("Error: No text content found in the message.")
             )
-            event_queue.enqueue_event(TaskState.completed)
+            await event_queue.enqueue_event(TaskState.completed)
             return
 
         logger.info("A2A task received: %s", user_text[:100])
@@ -50,18 +50,18 @@ class AgentTaskHandler(AgentExecutor):
                     user_text, self._llm, self._registry, self._max_iterations,
                 ),
             )
-            event_queue.enqueue_event(new_agent_text_message(result))
-            event_queue.enqueue_event(TaskState.completed)
+            await event_queue.enqueue_event(new_agent_text_message(result))
+            await event_queue.enqueue_event(TaskState.completed)
         except Exception as e:
             logger.exception("Agent execution failed")
-            event_queue.enqueue_event(
+            await event_queue.enqueue_event(
                 new_agent_text_message(f"Error: Agent execution failed: {e}")
             )
-            event_queue.enqueue_event(TaskState.failed)
+            await event_queue.enqueue_event(TaskState.failed)
 
     async def cancel(self, context: RequestContext, event_queue: EventQueue) -> None:
         """Handle task cancellation."""
-        event_queue.enqueue_event(
+        await event_queue.enqueue_event(
             new_agent_text_message("Task cancelled.")
         )
-        event_queue.enqueue_event(TaskState.canceled)
+        await event_queue.enqueue_event(TaskState.canceled)
