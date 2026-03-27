@@ -58,7 +58,7 @@ RUN python${PYTHON_VERSION} -m venv /opt/vllm-venv
 ENV VIRTUAL_ENV=/opt/vllm-venv \
     PATH="/opt/vllm-venv/bin:${PATH}"
 
-RUN pip install --upgrade pip setuptools wheel
+RUN pip install --upgrade pip setuptools wheel setuptools-scm
 
 # Tell grpcio to use system OpenSSL/zlib instead of bundled BoringSSL
 # (BoringSSL does not compile on ppc64le)
