@@ -126,6 +126,8 @@ def main() -> None:
         level=getattr(logging, settings.log_level.upper(), logging.INFO),
         format="%(asctime)s %(name)s %(levelname)s %(message)s",
     )
+    # Suppress noisy SDK debug logs while keeping agent debug logs visible
+    logging.getLogger("a2a").setLevel(logging.INFO)
 
     if args.cli:
         run_cli(settings)
