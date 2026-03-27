@@ -24,7 +24,7 @@ spec:
         procMount: "Unmasked"
       command: ["/bin/sh", "-c"]
       args: [
-          "TPT=${THREADS_PER_CORE:-2} && BIND=$(lscpu -p=cpu,core | grep -v '#' | sort -t, -k2 -n | awk -F, -v tpt=$TPT '{c=$2; if(seen[c]<tpt){print $1; seen[c]++}}' | paste -sd,) && export VLLM_CPU_OMP_THREADS_BIND=$BIND && export OMP_NUM_THREADS=$(echo $BIND | tr ',' '\\n' | wc -l) && echo \"Auto-detected thread binding: $BIND ($OMP_NUM_THREADS threads, $TPT per core)\" && vllm serve /models/ibm-granite/granite-3.3-8b-instruct --served-model-name ibm-granite/granite-3.3-8b-instruct --max-model-len 16384 --max-num-batched-tokens 16384 --max-num-seqs 8 --dtype bfloat16 --enable-chunked-prefill --max-num-chunked-seqs 1 --port 8000"
+          "TPT=${THREADS_PER_CORE:-2} && BIND=$(lscpu -p=cpu,core | grep -v '#' | sort -t, -k2 -n | awk -F, -v tpt=$TPT '{c=$2; if(seen[c]<tpt){print $1; seen[c]++}}' | paste -sd,) && export VLLM_CPU_OMP_THREADS_BIND=$BIND && export OMP_NUM_THREADS=$(echo $BIND | tr ',' '\\n' | wc -l) && echo \"Auto-detected thread binding: $BIND ($OMP_NUM_THREADS threads, $TPT per core)\" && vllm serve /models/ibm-granite/granite-3.3-8b-instruct --served-model-name ibm-granite/granite-3.3-8b-instruct --max-model-len 16384 --max-num-batched-tokens 16384 --max-num-seqs 8 --dtype bfloat16 --enable-chunked-prefill --port 8000"
       ]
       livenessProbe:
         httpGet:
