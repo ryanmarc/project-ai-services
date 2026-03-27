@@ -38,6 +38,7 @@ def build_registry(settings: Settings):
     """Create ToolRegistry and register available tools."""
     from agent.tools.base import ToolRegistry
     from agent.tools.summarize import SummarizeTool
+    from agent.tools.weather import WeatherTool
 
     registry = ToolRegistry()
     registry.register(
@@ -47,6 +48,7 @@ def build_registry(settings: Settings):
             timeout=settings.http_timeout,
         )
     )
+    registry.register(WeatherTool())
     return registry
 
 
