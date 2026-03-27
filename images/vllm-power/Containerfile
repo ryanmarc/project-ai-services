@@ -44,6 +44,9 @@ RUN dnf install -y \
         gcc-toolset-14-libatomic-devel \
         rust \
         cargo \
+        ninja-build \
+        protobuf-devel \
+        protobuf-compiler \
     && dnf clean all \
     && ln -sf /usr/lib64/libatomic.so.1 /usr/lib64/libatomic.so
 
@@ -76,7 +79,7 @@ ENV SITE_PACKAGE_PATH="/opt/vllm-venv/lib64/python${PYTHON_VERSION}/site-package
     VLLM_TARGET_DEVICE=cpu
 
 ENV LD_LIBRARY_PATH="${SITE_PACKAGE_PATH}/libprotobuf/lib64:${SITE_PACKAGE_PATH}/openblas/lib:${SITE_PACKAGE_PATH}:${SITE_PACKAGE_PATH}/ffmpeg/lib:${SITE_PACKAGE_PATH}/libvpx/lib:${SITE_PACKAGE_PATH}/lame/lib:${LD_LIBRARY_PATH}" \
-    CMAKE_PREFIX_PATH="${SITE_PACKAGE_PATH}/libprotobuf:${CMAKE_PREFIX_PATH}"
+    CMAKE_PREFIX_PATH="${SITE_PACKAGE_PATH}/libprotobuf:${SITE_PACKAGE_PATH}/torch:${CMAKE_PREFIX_PATH}"
 
 # Clone and build vLLM
 RUN git clone --depth 1 --branch ${VLLM_VERSION} https://github.com/vllm-project/vllm.git /tmp/vllm
