@@ -33,7 +33,7 @@ class Settings(BaseSettings):
 
     # HTTP client
     http_pool_maxsize: int = 10
-    http_timeout: int = 120
+    http_timeout: int = 600
 
     # Server
     agent_port: int = 9000
