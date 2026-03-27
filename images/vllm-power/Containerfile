@@ -41,9 +41,11 @@ RUN dnf install -y \
         libffi-devel \
         zlib-devel \
         libatomic \
+        gcc-toolset-14-libatomic-devel \
         rust \
         cargo \
-    && dnf clean all
+    && dnf clean all \
+    && ln -sf /usr/lib64/libatomic.so.1 /usr/lib64/libatomic.so
 
 # Activate gcc-toolset-14 for the entire build
 ENV PATH="/opt/rh/gcc-toolset-14/root/usr/bin:${PATH}" \
