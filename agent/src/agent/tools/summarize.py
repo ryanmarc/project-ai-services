@@ -54,13 +54,17 @@ class SummarizeTool(Tool):
             payload["length"] = arguments["length"]
 
         request_id = str(uuid.uuid4())
+        url = f"{self._endpoint}/v1/summarize"
+        logger.debug("Summarize API request: url=%s, request_id=%s, text_length=%d chars", url, request_id, len(payload["text"]))
         start = time.time()
         response = session.post(
-            f"{self._endpoint}/v1/summarize",
+            url,
             json=payload,
             headers={"X-Request-ID": request_id, "Content-Type": "application/json"},
             timeout=self._timeout,
         )
+        elapsed_ms = int((time.time() - start) * 1000)
+        logger.debug("Summarize API response: status=%d, request_id=%s, elapsed=%dms", response.status_code, request_id, elapsed_ms)
 
         if response.status_code == 429:
             return "Error: The summarize service is busy. Please try again later."
