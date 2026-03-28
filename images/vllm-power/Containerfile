@@ -115,7 +115,7 @@ RUN pip install --prefer-binary llguidance xgrammar numba \
 
 # Clean up build artifacts to reduce image size
 RUN rm -rf /tmp/vllm /tmp/pip-* /root/.cache/pip \
-    && dnf remove -y python${PYTHON_VERSION}-devel gcc-toolset-14 rust cargo \
+    && dnf remove -y python${PYTHON_VERSION}-devel rust cargo \
         cmake ninja-build make git \
         openssl-devel libffi-devel zlib-devel numactl-devel openblas-devel 2>/dev/null || true \
     && dnf clean all
