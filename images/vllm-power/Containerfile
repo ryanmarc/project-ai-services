@@ -109,6 +109,10 @@ RUN pip install --prefer-binary -r requirements/common.txt \
 
 RUN VLLM_TARGET_DEVICE=cpu python3 setup.py install
 
+# Install llguidance (Rust-based, needs cargo which is already present)
+RUN pip install --prefer-binary llguidance \
+        --extra-index-url=https://wheels.developerfirst.ibm.com/ppc64le/linux
+
 # Clean up build artifacts to reduce image size
 RUN rm -rf /tmp/vllm /tmp/pip-* /root/.cache/pip \
     && dnf remove -y python${PYTHON_VERSION}-devel gcc-toolset-14 rust cargo \
