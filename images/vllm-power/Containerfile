@@ -116,16 +116,20 @@ ARG PYTHON_VERSION=3.12
 RUN dnf install -y \
         python${PYTHON_VERSION} \
         numactl \
-        openblas \
         libatomic \
         gcc-toolset-14-runtime \
         gcc-toolset-14-libstdc++-devel \
     && dnf clean all
 
+# Copy openblas from builder (UBI9 runtime repos don't reliably provide it)
+COPY --from=builder /usr/lib64/libopenblas* /usr/lib64/
+
 # Copy protobuf libs from builder
 COPY --from=builder /usr/local/lib64/ /usr/local/lib64/
 COPY --from=builder /usr/local/lib/ /usr/local/lib/
 COPY --from=builder /usr/local/bin/protoc /usr/local/bin/protoc
+
+RUN ldconfig
 
 # Copy the entire venv from the builder
 COPY --from=builder /opt/vllm-venv /opt/vllm-venv
