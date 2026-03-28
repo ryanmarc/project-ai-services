@@ -72,19 +72,29 @@ RUN pip install --prefer-binary \
         -r /tmp/requirements.txt \
         --extra-index-url=https://wheels.developerfirst.ibm.com/ppc64le/linux
 
+# Build and install protobuf from source (not available as RPM on UBI9,
+# and the IBM torch wheel expects it but doesn't bundle it)
+ARG PROTOBUF_VERSION=25.6
+RUN git clone --depth 1 --branch v${PROTOBUF_VERSION} \
+        https://github.com/protocolbuffers/protobuf.git /tmp/protobuf \
+    && cd /tmp/protobuf \
+    && git submodule update --init --depth 1 \
+    && cmake -B build -G Ninja \
+        -DCMAKE_BUILD_TYPE=Release \
+        -DCMAKE_INSTALL_PREFIX=/usr/local \
+        -Dprotobuf_BUILD_TESTS=OFF \
+        -Dprotobuf_ABSL_PROVIDER=module \
+        -DCMAKE_POSITION_INDEPENDENT_CODE=ON \
+    && cmake --build build -j$(nproc) \
+    && cmake --install build \
+    && rm -rf /tmp/protobuf
+
 # Set library paths for the build
 ENV SITE_PACKAGE_PATH="/opt/vllm-venv/lib64/python${PYTHON_VERSION}/site-packages" \
     VLLM_TARGET_DEVICE=cpu
 
-ENV LD_LIBRARY_PATH="${SITE_PACKAGE_PATH}/libprotobuf/lib64:${SITE_PACKAGE_PATH}/openblas/lib:${SITE_PACKAGE_PATH}:${SITE_PACKAGE_PATH}/ffmpeg/lib:${SITE_PACKAGE_PATH}/libvpx/lib:${SITE_PACKAGE_PATH}/lame/lib:${LD_LIBRARY_PATH}" \
-    CMAKE_PREFIX_PATH="${SITE_PACKAGE_PATH}/libprotobuf:${SITE_PACKAGE_PATH}/torch:${CMAKE_PREFIX_PATH}"
-
-# Debug: verify protobuf location from IBM torch wheel
-RUN echo "=== Checking protobuf locations ===" \
-    && find ${SITE_PACKAGE_PATH} -name "protobuf*.pc" -o -name "FindProtobuf.cmake" -o -name "protobuf-config.cmake" 2>/dev/null || true \
-    && ls -la ${SITE_PACKAGE_PATH}/libprotobuf/ 2>/dev/null || echo "No libprotobuf dir in site-packages" \
-    && find ${SITE_PACKAGE_PATH}/torch -name "*protobuf*" -o -name "*Protobuf*" 2>/dev/null | head -20 || true \
-    && echo "=== CMAKE_PREFIX_PATH=${CMAKE_PREFIX_PATH} ==="
+ENV LD_LIBRARY_PATH="/usr/local/lib64:/usr/local/lib:${SITE_PACKAGE_PATH}/openblas/lib:${SITE_PACKAGE_PATH}:${SITE_PACKAGE_PATH}/ffmpeg/lib:${SITE_PACKAGE_PATH}/libvpx/lib:${SITE_PACKAGE_PATH}/lame/lib:${LD_LIBRARY_PATH}" \
+    CMAKE_PREFIX_PATH="/usr/local:${SITE_PACKAGE_PATH}/torch:${CMAKE_PREFIX_PATH}"
 
 # Clone and build vLLM
 RUN git clone --depth 1 --branch ${VLLM_VERSION} https://github.com/vllm-project/vllm.git /tmp/vllm
