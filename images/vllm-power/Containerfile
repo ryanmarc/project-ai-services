@@ -109,8 +109,8 @@ RUN pip install --prefer-binary -r requirements/common.txt \
 
 RUN VLLM_TARGET_DEVICE=cpu python3 setup.py install
 
-# Install llguidance (Rust-based, needs cargo which is already present)
-RUN pip install --prefer-binary llguidance \
+# Install structured output backends required by vLLM 0.11.1
+RUN pip install --prefer-binary llguidance xgrammar \
         --extra-index-url=https://wheels.developerfirst.ibm.com/ppc64le/linux
 
 # Clean up build artifacts to reduce image size
