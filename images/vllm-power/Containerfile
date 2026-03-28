@@ -117,9 +117,15 @@ RUN dnf install -y \
         python${PYTHON_VERSION} \
         numactl \
         openblas \
+        libatomic \
         gcc-toolset-14-runtime \
         gcc-toolset-14-libstdc++-devel \
     && dnf clean all
+
+# Copy protobuf libs from builder
+COPY --from=builder /usr/local/lib64/ /usr/local/lib64/
+COPY --from=builder /usr/local/lib/ /usr/local/lib/
+COPY --from=builder /usr/local/bin/protoc /usr/local/bin/protoc
 
 # Copy the entire venv from the builder
 COPY --from=builder /opt/vllm-venv /opt/vllm-venv
@@ -129,7 +135,7 @@ ENV VIRTUAL_ENV=/opt/vllm-venv \
     SITE_PACKAGE_PATH="/opt/vllm-venv/lib64/python${PYTHON_VERSION}/site-packages"
 
 # Runtime library paths
-ENV LD_LIBRARY_PATH="${SITE_PACKAGE_PATH}/libprotobuf/lib64:${SITE_PACKAGE_PATH}/openblas/lib:${SITE_PACKAGE_PATH}:${SITE_PACKAGE_PATH}/ffmpeg/lib:${SITE_PACKAGE_PATH}/libvpx/lib:${SITE_PACKAGE_PATH}/lame/lib:/opt/rh/gcc-toolset-14/root/usr/lib64" \
+ENV LD_LIBRARY_PATH="/usr/local/lib64:/usr/local/lib:/usr/lib64:${SITE_PACKAGE_PATH}/openblas/lib:${SITE_PACKAGE_PATH}:${SITE_PACKAGE_PATH}/ffmpeg/lib:${SITE_PACKAGE_PATH}/libvpx/lib:${SITE_PACKAGE_PATH}/lame/lib:/opt/rh/gcc-toolset-14/root/usr/lib64" \
     PATH="/opt/rh/gcc-toolset-14/root/usr/bin:${PATH}"
 
 # vLLM CPU defaults
