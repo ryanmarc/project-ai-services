@@ -27,6 +27,7 @@ ARG PYTHON_VERSION
 RUN dnf install -y \
         gcc-toolset-14 \
         gcc-toolset-14-libatomic-devel \
+        gcc-toolset-14-binutils \
         python${PYTHON_VERSION} \
         python${PYTHON_VERSION}-devel \
         python${PYTHON_VERSION}-pip \
