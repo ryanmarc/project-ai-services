@@ -46,7 +46,10 @@ RUN dnf install -y \
         cargo \
         ninja-build \
     && dnf clean all \
-    && ln -sf /usr/lib64/libatomic.so.1 /usr/lib64/libatomic.so
+    && ln -sf /usr/lib64/libatomic.so.1 /usr/lib64/libatomic.so \
+    && cp /opt/rh/gcc-toolset-14/root/usr/lib64/libctf.so.0* /usr/lib64/ 2>/dev/null \
+    || ln -sf /opt/rh/gcc-toolset-14/root/usr/lib64/libctf.so.0 /usr/lib64/libctf.so.0 2>/dev/null \
+    || true
 
 # Activate gcc-toolset-14
 ENV PATH="/opt/rh/gcc-toolset-14/root/usr/bin:${PATH}" \
@@ -101,7 +104,7 @@ RUN git clone --depth 1 --branch ${VLLM_VERSION} https://github.com/vllm-project
 
 WORKDIR /tmp/vllm
 
-RUN pip install -r requirements/common.txt \
+RUN pip install --prefer-binary -r requirements/common.txt \
         --extra-index-url=https://wheels.developerfirst.ibm.com/ppc64le/linux
 
 RUN VLLM_TARGET_DEVICE=cpu python3 setup.py install
