@@ -110,7 +110,7 @@ RUN pip install --prefer-binary -r requirements/common.txt \
 RUN VLLM_TARGET_DEVICE=cpu python3 setup.py install
 
 # Install structured output backends required by vLLM 0.11.1
-RUN pip install --prefer-binary llguidance xgrammar \
+RUN pip install --prefer-binary llguidance xgrammar numba \
         --extra-index-url=https://wheels.developerfirst.ibm.com/ppc64le/linux
 
 # Clean up build artifacts to reduce image size
