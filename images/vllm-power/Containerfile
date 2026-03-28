@@ -18,41 +18,40 @@ ARG BASE_IMAGE=registry.access.redhat.com/ubi9/ubi:latest
 ARG VLLM_VERSION=v0.11.1
 ARG PYTHON_VERSION=3.12
 
-# ---------------------------------------------------------------------------
-# Stage 1: Build vLLM from source
-# ---------------------------------------------------------------------------
-FROM ${BASE_IMAGE} AS builder
+FROM ${BASE_IMAGE}
 
 ARG VLLM_VERSION
 ARG PYTHON_VERSION
 
-# Install system dependencies including gcc-toolset-14
+# Install all system dependencies (build + runtime)
 RUN dnf install -y \
         gcc-toolset-14 \
+        gcc-toolset-14-libatomic-devel \
         python${PYTHON_VERSION} \
         python${PYTHON_VERSION}-devel \
         python${PYTHON_VERSION}-pip \
         git \
         cmake \
         make \
+        numactl \
         numactl-devel \
         openblas-devel \
         openssl-devel \
         libffi-devel \
         zlib-devel \
         libatomic \
-        gcc-toolset-14-libatomic-devel \
+        libgfortran \
         rust \
         cargo \
         ninja-build \
     && dnf clean all \
     && ln -sf /usr/lib64/libatomic.so.1 /usr/lib64/libatomic.so
 
-# Activate gcc-toolset-14 for the entire build
+# Activate gcc-toolset-14
 ENV PATH="/opt/rh/gcc-toolset-14/root/usr/bin:${PATH}" \
     CC=/opt/rh/gcc-toolset-14/root/usr/bin/gcc \
     CXX=/opt/rh/gcc-toolset-14/root/usr/bin/g++ \
-    LD_LIBRARY_PATH="/opt/rh/gcc-toolset-14/root/usr/lib64:/opt/rh/gcc-toolset-14/root/usr/lib${LD_LIBRARY_PATH:+:$LD_LIBRARY_PATH}"
+    LD_LIBRARY_PATH="/opt/rh/gcc-toolset-14/root/usr/lib64:/opt/rh/gcc-toolset-14/root/usr/lib"
 
 # Create and activate virtual environment
 RUN python${PYTHON_VERSION} -m venv /opt/vllm-venv
@@ -89,11 +88,11 @@ RUN git clone --depth 1 --branch v${PROTOBUF_VERSION} \
     && cmake --install build \
     && rm -rf /tmp/protobuf
 
-# Set library paths for the build
+# Set library paths
 ENV SITE_PACKAGE_PATH="/opt/vllm-venv/lib64/python${PYTHON_VERSION}/site-packages" \
     VLLM_TARGET_DEVICE=cpu
 
-ENV LD_LIBRARY_PATH="/usr/local/lib64:/usr/local/lib:${SITE_PACKAGE_PATH}/openblas/lib:${SITE_PACKAGE_PATH}:${SITE_PACKAGE_PATH}/ffmpeg/lib:${SITE_PACKAGE_PATH}/libvpx/lib:${SITE_PACKAGE_PATH}/lame/lib:${LD_LIBRARY_PATH}" \
+ENV LD_LIBRARY_PATH="/usr/local/lib64:/usr/local/lib:/usr/lib64:${SITE_PACKAGE_PATH}/openblas/lib:${SITE_PACKAGE_PATH}:${SITE_PACKAGE_PATH}/ffmpeg/lib:${SITE_PACKAGE_PATH}/libvpx/lib:${SITE_PACKAGE_PATH}/lame/lib:${LD_LIBRARY_PATH}" \
     CMAKE_PREFIX_PATH="/usr/local:${SITE_PACKAGE_PATH}/torch:${CMAKE_PREFIX_PATH}"
 
 # Clone and build vLLM
@@ -106,41 +105,16 @@ RUN pip install -r requirements/common.txt \
 
 RUN VLLM_TARGET_DEVICE=cpu python3 setup.py install
 
-# ---------------------------------------------------------------------------
-# Stage 2: Runtime image (smaller)
-# ---------------------------------------------------------------------------
-FROM ${BASE_IMAGE} AS runtime
-
-ARG PYTHON_VERSION=3.12
-
-RUN dnf install -y \
-        python${PYTHON_VERSION} \
-        numactl \
-        libatomic \
-        gcc-toolset-14-runtime \
-        gcc-toolset-14-libstdc++-devel \
+# Clean up build artifacts to reduce image size
+RUN rm -rf /tmp/vllm /tmp/pip-* /root/.cache/pip \
+    && dnf remove -y python${PYTHON_VERSION}-devel gcc-toolset-14 rust cargo \
+        cmake ninja-build make git \
+        openssl-devel libffi-devel zlib-devel numactl-devel openblas-devel 2>/dev/null || true \
     && dnf clean all
-
-# Copy openblas from builder (UBI9 runtime repos don't reliably provide it)
-COPY --from=builder /usr/lib64/libopenblas* /usr/lib64/
-
-# Copy protobuf libs from builder
-COPY --from=builder /usr/local/lib64/ /usr/local/lib64/
-COPY --from=builder /usr/local/lib/ /usr/local/lib/
-COPY --from=builder /usr/local/bin/protoc /usr/local/bin/protoc
 
 RUN ldconfig
 
-# Copy the entire venv from the builder
-COPY --from=builder /opt/vllm-venv /opt/vllm-venv
-
-ENV VIRTUAL_ENV=/opt/vllm-venv \
-    PATH="/opt/vllm-venv/bin:${PATH}" \
-    SITE_PACKAGE_PATH="/opt/vllm-venv/lib64/python${PYTHON_VERSION}/site-packages"
-
-# Runtime library paths
-ENV LD_LIBRARY_PATH="/usr/local/lib64:/usr/local/lib:/usr/lib64:${SITE_PACKAGE_PATH}/openblas/lib:${SITE_PACKAGE_PATH}:${SITE_PACKAGE_PATH}/ffmpeg/lib:${SITE_PACKAGE_PATH}/libvpx/lib:${SITE_PACKAGE_PATH}/lame/lib:/opt/rh/gcc-toolset-14/root/usr/lib64" \
-    PATH="/opt/rh/gcc-toolset-14/root/usr/bin:${PATH}"
+WORKDIR /
 
 # vLLM CPU defaults
 ENV VLLM_CPU_KVCACHE_SPACE=40 \
