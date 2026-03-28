@@ -126,8 +126,11 @@ RUN ldconfig
 WORKDIR /
 
 # vLLM CPU defaults
+# TORCH_COMPILE_DISABLE: torch inductor has no ppc64le CPU codegen backend,
+# so torch.compile() must be disabled (model runs in eager mode instead).
 ENV VLLM_CPU_KVCACHE_SPACE=40 \
     VLLM_CPU_OMP_THREADS_BIND="auto" \
+    TORCH_COMPILE_DISABLE=1 \
     PYTHONUNBUFFERED=1
 
 EXPOSE 8000
