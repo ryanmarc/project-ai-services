@@ -1,8 +1,6 @@
-import json
-import requests
 import numpy as np
+import litellm
 from common.misc_utils import get_logger
-from common.retry_utils import retry_on_transient_error
 
 logger = get_logger("Embedding")
 
@@ -20,25 +18,20 @@ class Embedding:
     def embed_query(self, text):
         return self._post_embedding([text])[0]
 
-    @retry_on_transient_error(max_retries=3, initial_delay=1.0, backoff_multiplier=2.0)
     def _post_embedding(self, texts):
-        payload = {
-            "input": texts,
+        kwargs = {
             "model": self.emb_model,
-            "truncate_prompt_tokens": self.max_tokens-1,
+            "input": texts,
+            "num_retries": 3,
         }
-        headers = {
-            "accept": "application/json",
-            "Content-type": "application/json"
-        }
-        response = requests.post(
-            f"{self.emb_endpoint}/v1/embeddings",
-            data=json.dumps(payload),
-            headers=headers
-        )
-        response.raise_for_status()
-        r = response.json()
-        embeddings = [data['embedding'] for data in r['data']]
+        if self.emb_endpoint:
+            kwargs["api_base"] = self.emb_endpoint
+        # truncate_prompt_tokens is vLLM-specific; pass it through and let
+        # litellm forward it to providers that support it.
+        kwargs["truncate_prompt_tokens"] = self.max_tokens - 1
+
+        response = litellm.embedding(**kwargs)
+        embeddings = [item["embedding"] for item in response.data]
         return [np.array(embed, dtype=np.float32) for embed in embeddings]
 
 def get_embedder(emb_model, emb_endpoint, max_tokens) -> Embedding:

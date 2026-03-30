@@ -23,7 +23,7 @@ if level != "":
 
 set_log_level(log_level)
 
-from common.llm_utils import create_llm_session, query_vllm_summarize, query_vllm_summarize_stream
+from common.llm_utils import create_llm_session, query_llm_summarize, query_llm_summarize_stream
 from common.misc_utils import get_model_endpoints, set_request_id
 from common.settings import get_settings
 from summarize.summ_utils import (
@@ -153,7 +153,7 @@ async def handle_summarize(
     if stream:
         await concurrency_limiter.acquire()
         try:
-            vllm_stream = query_vllm_summarize_stream(
+            llm_stream = query_llm_summarize_stream(
                 llm_endpoint=llm_endpoint,
                 messages=messages,
                 model=llm_model,
@@ -166,7 +166,7 @@ async def handle_summarize(
             raise SummarizeException(500, "LLM_ERROR",
                                      f"Failed to generate summary, error: {e} Please try again later")
         return StreamingResponse(
-            locked_stream(vllm_stream),
+            locked_stream(llm_stream),
             media_type="text/event-stream",
             headers={
                 "Cache-Control": "no-cache",
@@ -177,7 +177,7 @@ async def handle_summarize(
 
     async with concurrency_limiter:
         start = time.time()
-        result, in_tokens, out_tokens = query_vllm_summarize(
+        result, in_tokens, out_tokens = query_llm_summarize(
             llm_endpoint=llm_endpoint,
             messages=messages,
             model=llm_model,

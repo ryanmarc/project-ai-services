@@ -10,7 +10,6 @@ certifi==2026.2.25
 cffi==2.0.0
 charset-normalizer==3.4.6
 click==8.3.1
-cohere==5.19.0
 colorlog==6.10.1
 cryptography==46.0.5
 defusedxml==0.7.1
@@ -50,6 +49,7 @@ jsonref==1.1.0
 jsonschema==4.26.0
 jsonschema-specifications==2025.9.1
 latex2mathml==3.79.0
+litellm>=1.67.0
 lingua-language-detector==1.4.2
 lxml==6.0.2
 markdown-it-py==4.0.0

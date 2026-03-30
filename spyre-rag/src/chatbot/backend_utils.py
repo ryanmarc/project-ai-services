@@ -8,12 +8,12 @@ import time
 logger = get_logger("backend_utils")
 settings = get_settings()
 
-def validate_query_length(query, emb_endpoint):
-    
+def validate_query_length(query, emb_model, emb_endpoint):
+
     # Validate that the query length does not exceed the maximum allowed tokens.
 
     try:
-        tokens = tokenize_with_llm(query, emb_endpoint)
+        tokens = tokenize_with_llm(query, emb_model, emb_endpoint)
         token_count = len(tokens)
         
         if token_count > settings.max_query_token_length:

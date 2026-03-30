@@ -28,7 +28,7 @@ set_log_level(log_level)
 import common.db_utils as db
 from common.lang_utils import setup_language_detector, detect_language, lang_de, max_tokens_map
 from common.misc_utils import get_model_endpoints, set_request_id
-from common.llm_utils import create_llm_session, query_vllm_stream, query_vllm_non_stream, query_vllm_models
+from common.llm_utils import create_llm_session, query_llm_stream, query_llm_non_stream, query_llm_models
 from common.settings import get_settings
 from common.perf_utils import perf_registry
 from chatbot.backend_utils import search_only, validate_query_length
@@ -171,7 +171,7 @@ async def get_reference_docs(req: ReferenceRequest) -> ReferenceResponse:
 
         # Validate query length
         is_valid, error_msg = await asyncio.to_thread(
-            validate_query_length, req.prompt, emb_endpoint
+            validate_query_length, req.prompt, emb_model, emb_endpoint
         )
         if not is_valid:
             raise HTTPException(status_code=400, detail=error_msg)
@@ -208,7 +208,7 @@ async def list_models():
     logging.debug("List models..")
     try:
         llm_endpoint = llm_model_dict['llm_endpoint']
-        return await asyncio.to_thread(query_vllm_models, llm_endpoint)
+        return await asyncio.to_thread(query_llm_models, llm_endpoint)
     except Exception as e:
         raise HTTPException(status_code=500, detail=repr(e))
 
@@ -309,7 +309,7 @@ async def chat_completion(req: ChatCompletionRequest) -> ChatCompletionResponse 
 
         # Validate query length
         is_valid, error_msg = await asyncio.to_thread(
-            validate_query_length, query, emb_endpoint
+            validate_query_length, query, emb_model, emb_endpoint
         )
         if not is_valid:
             # Return streaming error response for consistency
@@ -369,26 +369,26 @@ async def chat_completion(req: ChatCompletionRequest) -> ChatCompletionResponse 
 
     try:
         if req.stream:
-            vllm_stream = await asyncio.to_thread(
-                query_vllm_stream, query, docs, llm_endpoint, llm_model, req.stop, max_tokens, req.temperature, perf_stat_dict, lang
+            llm_stream = await asyncio.to_thread(
+                query_llm_stream, query, docs, llm_endpoint, llm_model, req.stop, max_tokens, req.temperature, perf_stat_dict, lang
             )
             # For streaming, release is handled in locked_stream's finally block
-            return StreamingResponse(locked_stream(vllm_stream, perf_stat_dict), media_type="text/event-stream")
+            return StreamingResponse(locked_stream(llm_stream, perf_stat_dict), media_type="text/event-stream")
         else:
-            vllm_non_stream = await asyncio.to_thread(
-                query_vllm_non_stream, query, docs, llm_endpoint, llm_model, req.stop, max_tokens, req.temperature, perf_stat_dict, lang
+            llm_non_stream = await asyncio.to_thread(
+                query_llm_non_stream, query, docs, llm_endpoint, llm_model, req.stop, max_tokens, req.temperature, perf_stat_dict, lang
             )
             # Store metrics in registry for non-stream
             perf_registry.add_metric(perf_stat_dict)
 
             # Handle error responses
-            if isinstance(vllm_non_stream, dict) and "error" in vllm_non_stream:
-                raise HTTPException(status_code=500, detail=str(vllm_non_stream["error"]))
+            if isinstance(llm_non_stream, dict) and "error" in llm_non_stream:
+                raise HTTPException(status_code=500, detail=str(llm_non_stream["error"]))
 
-            # Convert vLLM response to ChatCompletionResponse
-            if isinstance(vllm_non_stream, dict) and "choices" in vllm_non_stream:
+            # Convert LLM response to ChatCompletionResponse
+            if isinstance(llm_non_stream, dict) and "choices" in llm_non_stream:
                 choices = []
-                for choice in vllm_non_stream.get("choices", []):
+                for choice in llm_non_stream.get("choices", []):
                     if isinstance(choice, dict):
                         message_dict = choice.get("message", {})
                         if isinstance(message_dict, dict):

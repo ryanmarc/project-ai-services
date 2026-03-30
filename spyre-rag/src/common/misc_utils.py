@@ -73,21 +73,59 @@ def get_txt_tab_filenames(file_paths, out_path):
     return original_filenames, input_txt_files, input_tab_files
 
 
+# Known litellm provider prefixes. If a model string's first segment
+# (before the first '/') matches one of these, it's already provider-prefixed.
+LITELLM_PROVIDERS = {
+    "hosted_vllm", "openai", "anthropic", "cohere", "bedrock", "azure",
+    "huggingface", "ollama", "replicate", "together_ai", "deepinfra",
+    "palm", "vertex_ai", "sagemaker", "ai21", "aleph_alpha", "anyscale",
+    "cloudflare", "gemini", "groq", "mistral", "perplexity", "fireworks_ai",
+    "text-completion-openai", "text-completion-codestral", "voyage",
+}
+
+
+def _auto_prefix_model(model: str, endpoint: str) -> str:
+    """Auto-prefix a model string with 'hosted_vllm/' for backward compatibility.
+
+    When an endpoint is set and the model string doesn't already have a known
+    litellm provider prefix, assume it's a bare HuggingFace model ID being
+    served by a local vLLM instance.
+    """
+    if not model:
+        return model
+    # If the model contains '/' and the first segment is a known provider, leave it alone
+    if "/" in model:
+        first_segment = model.split("/")[0]
+        if first_segment in LITELLM_PROVIDERS:
+            return model
+    # If an endpoint is set, auto-prefix with hosted_vllm/
+    if endpoint:
+        return f"hosted_vllm/{model}"
+    return model
+
+
 def get_model_endpoints():
+    llm_endpoint = os.getenv("LLM_ENDPOINT", "")
+    llm_model = os.getenv("LLM_MODEL", "")
+    emb_endpoint = os.getenv("EMB_ENDPOINT", "")
+    emb_model = os.getenv("EMB_MODEL", "")
+    reranker_endpoint = os.getenv("RERANKER_ENDPOINT", "")
+    reranker_model = os.getenv("RERANKER_MODEL", "")
+
     emb_model_dict = {
-        'emb_endpoint': os.getenv("EMB_ENDPOINT"),
-        'emb_model':    os.getenv("EMB_MODEL"),
+        'emb_endpoint': emb_endpoint or None,
+        'emb_model':    _auto_prefix_model(emb_model, emb_endpoint),
         'max_tokens':   int(os.getenv("EMB_MAX_TOKENS", "512")),
     }
 
     llm_model_dict = {
-        'llm_endpoint': os.getenv("LLM_ENDPOINT", ""),
-        'llm_model':    os.getenv("LLM_MODEL", ""),
+        'llm_endpoint': llm_endpoint,
+        'llm_model':    _auto_prefix_model(llm_model, llm_endpoint),
     }
 
     reranker_model_dict = {
-        'reranker_endpoint': os.getenv("RERANKER_ENDPOINT"),
-        'reranker_model':    os.getenv("RERANKER_MODEL"),
+        'reranker_endpoint': reranker_endpoint or None,
+        'reranker_model':    _auto_prefix_model(reranker_model, reranker_endpoint),
     }
 
     return emb_model_dict, llm_model_dict, reranker_model_dict
@@ -138,10 +176,6 @@ def validate_pdf_file(filename: str, content) -> None:
     if not filename.lower().endswith('.pdf'):
         raise ValueError(f"Only PDF files are allowed. Invalid file: {filename}")
 
-    pdf_signature = b'%PDF'
-    if not content.startswith(pdf_signature):
-        raise ValueError(f"File has .pdf extension but unsupported format: {filename}")
-
     # Check content is bytes (not an exception from failed read)
     if isinstance(content, Exception):
         raise ValueError(f"Failed to read file: {filename}")
@@ -152,6 +186,10 @@ def validate_pdf_file(filename: str, content) -> None:
     # Check content is not empty
     if len(content) == 0:
         raise ValueError(f"File is empty: {filename}")
+
+    pdf_signature = b'%PDF'
+    if not content.startswith(pdf_signature):
+        raise ValueError(f"File has .pdf extension but unsupported format: {filename}")
 
 def get_unprocessed_files(original_files, processed_pdfs):
     return set(original_files).difference(set(processed_pdfs))
