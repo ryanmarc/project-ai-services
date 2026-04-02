@@ -1,4 +1,4 @@
-# Repository Reorganization Proposal (Revised)
+# Repository Reorganization Proposal
 
 ## Proposed Folder Structure
 
