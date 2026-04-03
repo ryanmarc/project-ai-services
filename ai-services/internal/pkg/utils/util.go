@@ -17,7 +17,8 @@ import (
 )
 
 const (
-	maxKeyValueParts = 2
+	maxKeyValueParts  = 2
+	maxHostnameLength = 63
 )
 
 // IsTransientK8sError checks if a Kubernetes API error is transient and should be retried.
@@ -250,10 +251,10 @@ func SetNestedValue(out map[string]any, dottedKey string, value any) {
 }
 
 // rfc1035HostnameRegex validates RFC 1035 hostname format:
-// - 1-63 characters
-// - lowercase letters, numbers, and hyphens only
-// - must start with a letter
-// - must end with a letter or number
+// - 1-63 characters.
+// - lowercase letters, numbers, and hyphens only.
+// - must start with a letter.
+// - must end with a letter or number.
 var rfc1035HostnameRegex = regexp.MustCompile(`^[a-z]([a-z0-9-]{0,61}[a-z0-9])?$`)
 
 func VerifyAppName(appName string) error {
@@ -261,8 +262,8 @@ func VerifyAppName(appName string) error {
 		return fmt.Errorf("application name cannot be empty")
 	}
 
-	if len(appName) > 63 {
-		return fmt.Errorf("invalid application name '%s': must be 63 characters or less", appName)
+	if len(appName) > maxHostnameLength {
+		return fmt.Errorf("invalid application name '%s': must be %d characters or less", appName, maxHostnameLength)
 	}
 
 	if !rfc1035HostnameRegex.MatchString(appName) {
