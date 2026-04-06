@@ -10,9 +10,24 @@ import json
 from contextlib import asynccontextmanager
 from asyncio import BoundedSemaphore
 from functools import wraps
+import uvicorn
+from starlette.concurrency import iterate_in_threadpool
+from lingua import Language
+
+from common.misc_utils import set_log_level
+log_level = logging.INFO
+level = os.getenv("LOG_LEVEL", "").removeprefix("--").lower()
+if level != "":
+    if "debug" in level:
+        log_level = logging.DEBUG
+    elif not "info" in level:
+        logging.warning(f"Unknown LOG_LEVEL passed: '{level}', using default INFO level")
+
+set_log_level(log_level)
+
 import common.db_utils as db
 from common.lang_utils import setup_language_detector, detect_language, lang_de, max_tokens_map
-from common.misc_utils import get_model_endpoints, set_log_level, set_request_id
+from common.misc_utils import get_model_endpoints, set_request_id
 from common.llm_utils import create_llm_session, query_vllm_stream, query_vllm_non_stream, query_vllm_models
 from common.settings import get_settings
 from common.perf_utils import perf_registry
@@ -29,20 +44,10 @@ from chatbot.response_utils import (
     ModelsResponse,
     PerfMetricsResponse,
 )
-import uvicorn
-from starlette.concurrency import iterate_in_threadpool
-from lingua import Language
-
-log_level = logging.INFO
-level = os.getenv("LOG_LEVEL", "").removeprefix("--").lower()
-if level != "":
-    if "debug" in level:
-        log_level = logging.DEBUG
-    elif not "info" in level:
-        logging.warning(f"Unknown LOG_LEVEL passed: '{level}', using default INFO level")
-set_log_level(log_level)
 
 vectorstore = None
+vectorstore_lock = asyncio.Lock()
+
 # Globals to be set dynamically
 emb_model_dict = {}
 llm_model_dict = {}
@@ -62,10 +67,25 @@ def initialize_vectorstore():
     global vectorstore
     vectorstore = db.get_vector_store()
 
+async def ensure_vectorstore_initialized():
+    """Lazy initialization of vectorstore on first request.
+    
+    Note: This lazy initialization approach is used to facilitate OpenShift deployments,
+    allowing the application to start successfully even when the vector store is not
+    immediately available.
+    """
+    global vectorstore
+    if vectorstore is None:
+        async with vectorstore_lock:
+            # Double-check pattern to avoid race conditions
+            if vectorstore is None:
+                logging.info("Initializing vectorstore on first request...")
+                initialize_vectorstore()
+                logging.info("Vectorstore initialized successfully")
+
 @asynccontextmanager
 async def lifespan(app):
     initialize_models()
-    initialize_vectorstore()
     setup_language_detector([Language.ENGLISH, Language.GERMAN])
     create_llm_session(pool_maxsize=POOL_SIZE)
     yield
@@ -137,6 +157,10 @@ async def get_reference_docs(req: ReferenceRequest) -> ReferenceResponse:
     # Validate query is not empty
     if not req.prompt or not req.prompt.strip():
         raise HTTPException(status_code=400, detail="Query cannot be empty")
+
+    # Ensure vectorstore is initialized on first request
+    if vectorstore is None:
+        await ensure_vectorstore_initialized()
 
     try:
         emb_model = emb_model_dict['emb_model']
@@ -270,6 +294,10 @@ async def chat_completion(req: ChatCompletionRequest) -> ChatCompletionResponse 
     if not query or not query.strip():
         raise HTTPException(status_code=400, detail="Query cannot be empty")
 
+    # Ensure vectorstore is initialized on first request
+    if vectorstore is None:
+        await ensure_vectorstore_initialized()
+
     try:
         emb_model = emb_model_dict['emb_model']
         emb_endpoint = emb_model_dict['emb_endpoint']
@@ -388,6 +416,10 @@ async def chat_completion(req: ChatCompletionRequest) -> ChatCompletionResponse 
 )
 async def db_status() -> DBStatusResponse:
     try:
+        # Ensure vectorstore is initialized on first request
+        if vectorstore is None:
+            await ensure_vectorstore_initialized()
+
         if vectorstore is None:
             return DBStatusResponse(ready=False, message="Vector store not initialized")
 

@@ -4,6 +4,18 @@
   background-color: var(--cds-background);
   min-height: 100vh;
   padding: 0;
+  position: relative;
+}
+
+.submittingOverlay {
+  position: fixed;
+  top: 0;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  background-color: rgba(0, 0, 0, 0.5);
+  z-index: 8000;
+  cursor: not-allowed;
 }
 
 .notificationWrapper {
@@ -16,6 +28,36 @@
   :global {
     .cds--inline-notification {
       margin-bottom: 0;
+    }
+    
+    .cds--toast-notification {
+      margin-bottom: 0;
+
+      &.cds--toast-notification--success {
+        background-color: var(--cds-notification-background-success);
+      }
+      
+      &.cds--toast-notification--error {
+        background-color: var(--cds-notification-background-error);
+      }
+      
+      &.cds--toast-notification--info {
+        background-color: var(--cds-notification-background-info);
+      }
+      
+      .cds--toast-notification__title {
+        color: var(--cds-text-primary);
+      }
+      
+      .cds--toast-notification__subtitle {
+        color: var(--cds-text-secondary);
+      }
+      
+      .cds--toast-notification__close-button {
+        svg {
+          fill: var(--cds-icon-primary);
+        }
+      }
     }
   }
 }

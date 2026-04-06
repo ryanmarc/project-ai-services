@@ -16,8 +16,7 @@ import {
   Button,
   Tag,
   Theme,
-  Link,
-  InlineNotification,
+  ToastNotification,
   Modal,
   Checkbox,
   CheckboxGroup,
@@ -68,6 +67,7 @@ interface JobMonitorState {
   csvFileName: string;
   exportStatus: ExportStatus;
   exportErrorMessage: string;
+  isIngestSubmitting: boolean;
 }
 
 type JobMonitorAction =
@@ -85,6 +85,7 @@ type JobMonitorAction =
   | { type: 'HIDE_DELETE_STATUS' }
   | { type: 'OPEN_DELETE_MODAL'; payload: string }
   | { type: 'CLOSE_DELETE_MODAL' }
+  | { type: 'CLOSE_DELETE_MODAL_KEEP_JOB' }
   | { type: 'SET_CONFIRMED'; payload: boolean }
   | { type: 'SHOW_ERROR'; payload: { message: string; jobName?: string } }
   | { type: 'HIDE_ERROR' }
@@ -95,7 +96,8 @@ type JobMonitorAction =
   | { type: 'SET_CSV_FILENAME'; payload: string }
   | { type: 'SET_EXPORT_STATUS'; payload: ExportStatus }
   | { type: 'SET_EXPORT_ERROR'; payload: string }
-  | { type: 'CLEAR_EXPORT_ERROR' };
+  | { type: 'CLEAR_EXPORT_ERROR' }
+  | { type: 'SET_INGEST_SUBMITTING'; payload: boolean };
 
 const initialState: JobMonitorState = {
   jobs: [],
@@ -120,6 +122,7 @@ const initialState: JobMonitorState = {
   csvFileName: '',
   exportStatus: 'idle',
   exportErrorMessage: '',
+  isIngestSubmitting: false,
 };
 
 const jobMonitorReducer = (
@@ -202,6 +205,12 @@ const jobMonitorReducer = (
         isConfirmed: false,
         jobToDelete: null,
       };
+    case 'CLOSE_DELETE_MODAL_KEEP_JOB':
+      return {
+        ...state,
+        showDeleteModal: false,
+        isConfirmed: false,
+      };
     case 'SET_CONFIRMED':
       return { ...state, isConfirmed: action.payload };
     case 'DELETE_JOB':
@@ -252,6 +261,8 @@ const jobMonitorReducer = (
       };
     case 'CLEAR_EXPORT_ERROR':
       return { ...state, exportErrorMessage: '' };
+    case 'SET_INGEST_SUBMITTING':
+      return { ...state, isIngestSubmitting: action.payload };
     default:
       return state;
   }
@@ -434,22 +445,51 @@ const JobMonitorPage = () => {
   const handleDeleteConfirm = async () => {
     if (!state.jobToDelete) return;
 
+    const jobName = getJobName(state.jobs.find((j) => j.job_id === state.jobToDelete)!);
     dispatch({ type: 'SET_IS_DELETING', payload: true });
 
     try {
       await deleteJob(state.jobToDelete);
       dispatch({ type: 'DELETE_JOB', payload: state.jobToDelete });
-      fetchJobs();
-    } catch (error: any) {
-      const msg = error.response?.data?.detail || error.message || 'Failed deleting job';
-      const name = getJobName(state.jobs.find((j) => j.job_id === state.jobToDelete)!);
+      
+      // Show success notification
       dispatch({
-        type: 'SHOW_ERROR',
-        payload: { message: msg, jobName: name },
+        type: 'SET_DELETE_STATUS',
+        payload: {
+          show: true,
+          kind: 'success',
+          title: 'Job deleted successfully',
+          subtitle: `"${jobName}" has been removed`,
+        },
       });
-    } finally {
+
+      // Hide success notification after 3 seconds
+      setTimeout(() => {
+        dispatch({ type: 'HIDE_DELETE_STATUS' });
+      }, 3000);
+
+      fetchJobs();
+      
+      // Close modal and clear state on success
       dispatch({ type: 'SET_IS_DELETING', payload: false });
       dispatch({ type: 'CLOSE_DELETE_MODAL' });
+    } catch (error: any) {
+      const msg = error.response?.data?.detail || error.message || 'Failed deleting job';
+      
+      // Show error notification
+      dispatch({
+        type: 'SET_DELETE_STATUS',
+        payload: {
+          show: true,
+          kind: 'error',
+          title: 'Failed to delete job',
+          subtitle: `${jobName}: ${msg}`,
+        },
+      });
+      
+      // Close modal but keep jobToDelete for retry
+      dispatch({ type: 'SET_IS_DELETING', payload: false });
+      dispatch({ type: 'CLOSE_DELETE_MODAL_KEEP_JOB' });
     }
   };
 
@@ -586,7 +626,8 @@ const JobMonitorPage = () => {
           <span className={styles.statusText}>{jobStatus}</span>
           {hasError && (
             <Tooltip
-              align="top"
+              align="bottom"
+              autoAlign={true}
               label={getErrorMessage(job)}
               className={styles.errorTooltip}
             >
@@ -637,53 +678,77 @@ const JobMonitorPage = () => {
   return (
     <Theme theme={effectiveTheme}>
       <div className={styles.jobMonitorPage}>
+        {/* Overlay when submitting */}
+        {state.isIngestSubmitting && (
+          <div className={styles.submittingOverlay} />
+        )}
         {state.toastOpen && (
-          <ActionableNotification
-            actionButtonLabel="Try again"
-            aria-label="close notification"
-            kind="error"
-            closeOnEscape
-            title={state.errorJobName ? `Delete job ${state.errorJobName} failed` : 'Error loading jobs'}
-            subtitle={state.errorMessage}
-            onActionButtonClick={() => {
-              dispatch({ type: 'HIDE_ERROR' });
-              fetchJobs();
-            }}
-            onCloseButtonClick={() => {
-              dispatch({ type: 'HIDE_ERROR' });
-            }}
-            style={{
-              position: 'fixed',
-              top: '4rem',
-              right: '2rem',
-              zIndex: 9999,
-            }}
-          />
+          <div className={styles.notificationWrapper}>
+            <ActionableNotification
+              actionButtonLabel="Try again"
+              aria-label="close notification"
+              kind="error"
+              closeOnEscape
+              title={state.errorJobName ? `Delete job ${state.errorJobName} failed` : 'Error loading jobs'}
+              subtitle={state.errorMessage}
+              onActionButtonClick={() => {
+                dispatch({ type: 'HIDE_ERROR' });
+                fetchJobs();
+              }}
+              onCloseButtonClick={() => {
+                dispatch({ type: 'HIDE_ERROR' });
+              }}
+              lowContrast
+            />
+          </div>
         )}
         {/* Upload Status Notification */}
         {state.uploadStatus.show && (
           <div className={styles.notificationWrapper}>
-            <InlineNotification
+            <ToastNotification
               kind={state.uploadStatus.kind}
               title={state.uploadStatus.title}
               subtitle={state.uploadStatus.subtitle}
               onClose={() => dispatch({ type: 'HIDE_UPLOAD_STATUS' })}
-              hideCloseButton={false}
+              timeout={state.uploadStatus.kind === 'success' ? 3000 : 0}
+            />
+          </div>
+        )}
+
+        {/* Delete Error Notification with Retry */}
+        {state.deleteStatus.show && state.deleteStatus.kind === 'error' && (
+          <div className={styles.notificationWrapper}>
+            <ActionableNotification
+              actionButtonLabel="Try again"
+              aria-label="close notification"
+              kind="error"
+              closeOnEscape
+              title={state.deleteStatus.title}
+              subtitle={state.deleteStatus.subtitle}
+              onActionButtonClick={() => {
+                dispatch({ type: 'HIDE_DELETE_STATUS' });
+                // Re-open the delete modal with the last job
+                if (state.jobToDelete) {
+                  dispatch({ type: 'OPEN_DELETE_MODAL', payload: state.jobToDelete });
+                }
+              }}
+              onCloseButtonClick={() => {
+                dispatch({ type: 'HIDE_DELETE_STATUS' });
+              }}
               lowContrast
             />
           </div>
         )}
 
-        {/* Delete Status Notification */}
-        {state.deleteStatus.show && (
+        {/* Delete Success Notification */}
+        {state.deleteStatus.show && state.deleteStatus.kind === 'success' && (
           <div className={styles.notificationWrapper}>
-            <InlineNotification
-              kind={state.deleteStatus.kind}
+            <ToastNotification
+              kind="success"
               title={state.deleteStatus.title}
               subtitle={state.deleteStatus.subtitle}
               onClose={() => dispatch({ type: 'HIDE_DELETE_STATUS' })}
-              hideCloseButton={false}
-              lowContrast
+              timeout={3000}
             />
           </div>
         )}
@@ -691,10 +756,7 @@ const JobMonitorPage = () => {
         {/* Page Header */}
         <div className={styles.pageHeader}>
           <div className={styles.headerContent}>
-            <h1 className={styles.pageTitle}>Ingested documents log</h1>
-            <Link href="https://www.ibm.com/docs/en/aiservices/2025.12.0?topic=services-introduction" className={styles.learnMore} target="_blank" rel="noopener noreferrer">
-              Learn more →
-            </Link>
+            <h1 className={styles.pageTitle}>Jobs</h1>
           </div>
         </div>
 
@@ -752,7 +814,7 @@ const JobMonitorPage = () => {
                           renderIcon={Add}
                           onClick={() => dispatch({ type: 'SET_INGEST_SIDE_PANEL_OPEN', payload: true })}
                         >
-                          Ingest
+                          Create
                         </Button>
                       </TableToolbarContent>
                     </TableToolbar>
@@ -820,6 +882,9 @@ const JobMonitorPage = () => {
           open={state.isIngestSidePanelOpen}
           onClose={() => dispatch({ type: 'SET_INGEST_SIDE_PANEL_OPEN', payload: false })}
           onSubmit={handleIngestSubmit}
+          onSubmittingChange={(isSubmitting) =>
+            dispatch({ type: 'SET_INGEST_SUBMITTING', payload: isSubmitting })
+          }
         />
 
         {/* Job Details Side Panel */}
