@@ -253,6 +253,9 @@ func frameAndApply(client *openshift.OpenshiftClient, spec map[string]any, s *sp
 
 			return nil
 		}
+		if apierrors.IsForbidden(err) {
+			return fmt.Errorf("missing required permissions to create SpyreClusterPolicy")
+		}
 	}
 
 	return err
@@ -270,6 +273,15 @@ func waitForSpyreClusterPolicy(client *openshift.OpenshiftClient) error {
 		if err := client.Client.Get(ctx, k8stypes.NamespacedName{Name: "spyreclusterpolicy"}, obj); err != nil {
 			if apierrors.IsNotFound(err) {
 				logger.Infof("SpyreClusterPolicy not found yet, waiting...", logger.VerbosityLevelDebug)
+
+				return false, nil
+			}
+			if apierrors.IsForbidden(err) {
+				return false, fmt.Errorf("missing required permissions to get SpyreClusterPolicy")
+			}
+			// Handle rate limiting and other transient errors as retryable
+			if utils.IsTransientK8sError(err) {
+				logger.Infof("Transient error getting SpyreClusterPolicy (rate limit or timeout), retrying...", logger.VerbosityLevelDebug)
 
 				return false, nil
 			}
@@ -305,6 +317,13 @@ func waitForRHODSResource(client *openshift.OpenshiftClient, kind string) error 
 		}
 		resource, exists, err := utils.GetExistingCustomResource(client, gvk)
 		if err != nil {
+			// Handle rate limiting and other transient errors as retryable
+			if utils.IsTransientK8sError(err) {
+				logger.Infof("Transient error getting %s (rate limit or timeout), retrying...", kind, logger.VerbosityLevelDebug)
+
+				return false, nil
+			}
+
 			return false, fmt.Errorf("failed to get %s: %w", kind, err)
 		}
 

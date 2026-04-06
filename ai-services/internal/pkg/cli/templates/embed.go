@@ -34,6 +34,9 @@ const (
 	minPathPartsForAppName = 3
 )
 
+// ErrRuntimeNotSupported is returned when an application does not support the requested runtime.
+var ErrRuntimeNotSupported = errors.New("runtime not supported")
+
 type embedTemplateProvider struct {
 	fs      *embed.FS
 	root    string
@@ -82,7 +85,18 @@ func (e *embedTemplateProvider) ListApplications(hidden bool) ([]string, error) 
 
 // ListApplicationTemplateValues lists all available template value keys for a single application.
 func (e *embedTemplateProvider) ListApplicationTemplateValues(app string) (map[string]string, error) {
-	valuesPath := fmt.Sprintf("%s/%s/%s/values.yaml", e.root, app, e.Runtime())
+	// Check if the runtime directory exists for this application
+	runtimePath := fmt.Sprintf("%s/%s/%s", e.root, app, e.Runtime())
+	_, err := fs.Stat(e.fs, runtimePath)
+	if err != nil {
+		if errors.Is(err, fs.ErrNotExist) {
+			return nil, fmt.Errorf("check runtime directory: %w: application %s does not support runtime %s", ErrRuntimeNotSupported, app, e.Runtime())
+		}
+
+		return nil, fmt.Errorf("check runtime directory: %w", err)
+	}
+
+	valuesPath := fmt.Sprintf("%s/values.yaml", runtimePath)
 	valuesData, err := e.fs.ReadFile(valuesPath)
 	if err != nil {
 		return nil, fmt.Errorf("read values.yaml: %w", err)
@@ -181,7 +195,7 @@ func (e *embedTemplateProvider) LoadValues(app string, valuesFileOverrides []str
 		return nil, fmt.Errorf("failed to parse values.yaml: %w", err)
 	}
 
-	// Load user provided file overrides
+	// Load user provided file overrides and validate them
 	for _, overridePath := range valuesFileOverrides {
 		overrideData, err := os.ReadFile(overridePath)
 		if err != nil {
@@ -191,6 +205,13 @@ func (e *embedTemplateProvider) LoadValues(app string, valuesFileOverrides []str
 		if err := yaml.Unmarshal(overrideData, &overrideValues); err != nil {
 			return nil, fmt.Errorf("failed to parse override file %s: %w", overridePath, err)
 		}
+
+		// Validate that all parameters in the override file are supported
+		overrideParamsMap := utils.FlattenMapToKeys(overrideValues, "")
+		if err := utils.ValidateParams(overrideParamsMap, values); err != nil {
+			return nil, fmt.Errorf("validation failed for override file %s: %w", overridePath, err)
+		}
+
 		for key, val := range overrideValues {
 			utils.SetNestedValue(values, key, val)
 		}

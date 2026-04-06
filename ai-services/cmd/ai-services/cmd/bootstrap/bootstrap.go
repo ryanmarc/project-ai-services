@@ -6,9 +6,16 @@ import (
 	"github.com/charmbracelet/lipgloss"
 	"github.com/project-ai-services/ai-services/internal/pkg/bootstrap"
 	"github.com/project-ai-services/ai-services/internal/pkg/logger"
+	"github.com/project-ai-services/ai-services/internal/pkg/runtime"
 	"github.com/project-ai-services/ai-services/internal/pkg/runtime/types"
+	"github.com/project-ai-services/ai-services/internal/pkg/utils"
 	"github.com/project-ai-services/ai-services/internal/pkg/vars"
 	"github.com/spf13/cobra"
+)
+
+var (
+	// Runtime type flag for bootstrap command.
+	runtimeType string
 )
 
 // BootstrapCmd represents the bootstrap command.
@@ -18,6 +25,21 @@ func BootstrapCmd() *cobra.Command {
 		Short:   "Initializes AI Services infrastructure",
 		Long:    bootstrapDescription(),
 		Example: bootstrapExample(),
+		Args:    cobra.NoArgs,
+		PersistentPreRunE: func(cmd *cobra.Command, args []string) error {
+			cmd.SilenceUsage = true
+			// Initialize runtime factory based on flag
+			rt := types.RuntimeType(runtimeType)
+			if !rt.Valid() {
+				return fmt.Errorf("invalid runtime type: %s (must be 'podman' or 'openshift'). Please specify runtime using --runtime flag", runtimeType)
+			}
+
+			vars.RuntimeFactory = runtime.NewRuntimeFactory(rt)
+			logger.Infof("Using runtime: %s\n", rt, logger.VerbosityLevelDebug)
+
+			// Check if podman runtime is being used on unsupported platform
+			return utils.CheckPodmanPlatformSupport(vars.RuntimeFactory.GetRuntimeType())
+		},
 		RunE: func(cmd *cobra.Command, args []string) error {
 			cmd.SilenceUsage = true
 
@@ -49,6 +71,10 @@ func BootstrapCmd() *cobra.Command {
 		},
 	}
 
+	// Add runtime flag as required
+	bootstrapCmd.PersistentFlags().StringVar(&runtimeType, "runtime", "", fmt.Sprintf("runtime to use (options: %s, %s) (required)", types.RuntimeTypePodman, types.RuntimeTypeOpenShift))
+	_ = bootstrapCmd.MarkPersistentFlagRequired("runtime")
+
 	// subcommands
 	bootstrapCmd.AddCommand(validateCmd())
 	bootstrapCmd.AddCommand(configureCmd())
@@ -60,8 +86,14 @@ func bootstrapExample() string {
 	return `  # Validate the environment
   ai-services bootstrap validate
 
+  # Validate the environment for openshift runtime
+  ai-services bootstrap validate --runtime openshift
+
   # Configure the infrastructure
   ai-services bootstrap configure
+
+  # Configure the infrastructure for openshift runtime
+  ai-services bootstrap configure --runtime openshift
 
   # Get help on a specific subcommand
   ai-services bootstrap validate --help`
@@ -76,19 +108,23 @@ to run AI Services, ensuring prerequisites are met and initial configuration is 
 Available subcommands:
 
 Configure - Configure performs below actions
- - For Podman:
-   - Installs podman on host if not installed
-   - Runs servicereport tool to configure required spyre cards
-   - Initializes the AI Services infrastructure
+- For Podman:
+ - Installs podman on host if not installed
+ - Runs servicereport tool to configure required spyre cards
+ - Initializes the AI Services infrastructure
 
- - For OpenShift:
-   - Installs machine config, and dependant operators
-   - Installs and configures SpyreClusterPolicy	
+- For OpenShift:
+ - Applies required machine configs for Spyre operator
+ - Installs required operators and operands
+ - Creates and configures SpyreClusterPolicy
+ - Creates DSCInitialization if it does not exist
+ - Creates or updates DataScienceCluster with kserve enabled
+ - Waits for all required components to become ready
 
 Validate - Checks below system prerequisites:
 - For Podman:
 %s
 
-- For Openshift:
+- For OpenShift:
 %s`, podmanList, openshiftList)
 }

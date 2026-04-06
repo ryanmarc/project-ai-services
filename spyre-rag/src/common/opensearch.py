@@ -6,6 +6,7 @@ from opensearchpy import OpenSearch, helpers
 
 from common.misc_utils import get_logger
 from common.vector_db import VectorStore, VectorStoreNotReadyError
+from common.retry_utils import retry_on_transient_error
 
 logger = get_logger("OpenSearch")
 
@@ -54,6 +55,7 @@ class OpensearchVectorStore(VectorStore):
         hash_part = hashlib.md5(name.encode()).hexdigest()
         return f"{self.db_prefix}_{hash_part}"
 
+    @retry_on_transient_error(max_retries=3, initial_delay=5.0, backoff_multiplier=2.0)
     def _create_pipeline(self):
         logger.debug("Creating hybrid search pipeline")
 
@@ -78,7 +80,9 @@ class OpensearchVectorStore(VectorStore):
             logger.debug("Hybrid search pipeline created successfully")
         except Exception as e:
             logger.error(f"Failed to create hybrid search pipeline: {e}")
+            raise
 
+    @retry_on_transient_error(max_retries=3, initial_delay=5.0, backoff_multiplier=2.0)
     def _setup_index(self, dim):
         logger.debug(f"Setting up index {self.index_name} with dimension {dim}")
 
@@ -91,13 +95,16 @@ class OpensearchVectorStore(VectorStore):
         index_body = {
             "settings": {
                 "index": {
-                    "knn": True,
-                    "knn.algo_param.ef_search": 100
+                    "knn": True,  # Enable k-NN search functionality
+                    "knn.algo_param.ef_search": 100  # Number of candidates to consider during search (higher = more accurate but slower)
                 }
             },
             "mappings": {
                 "properties": {
+                    # Unique identifier for each chunk, generated from doc_id and content hash
                     "chunk_id": {"type": "long"},
+                    
+                    # Vector embedding field for semantic search
                     "embedding": {
                         "type": "knn_vector",
                         "dimension": dim,
@@ -111,15 +118,28 @@ class OpensearchVectorStore(VectorStore):
                             }
                         }
                     },
-                     "page_content": {
-                        "type": "text", 
+                    
+                    # The actual text content of the chunk for keyword search and retrieval
+                    "text": {
+                        "type": "text",
                         "analyzer": "standard"
                     },
-                    "filename": {"type": "keyword"},
-                    "doc_id": {"type": "keyword"},
-                    "type": {"type": "keyword"},
-                    "source": {"type": "keyword"},
-                    "language": {"type": "keyword"}
+                    
+                    # Metadata container for document attributes
+                    "metadata": {
+                        "dynamic": "true",  # Allow additional metadata fields to be added dynamically
+                        "properties": {
+                            "filename": {"type": "keyword"},  # Original filename
+                            "doc_id": {"type": "keyword"},  # Unique document identifier (UUID)
+                            "type": {"type": "keyword"},  # Document type (e.g., text, table)
+                            "source": {"type": "keyword"},  # Source of the text e.g: Chapter -> Section etc..
+                            "language": {"type": "keyword"},  # Language code (e.g., 'en', 'de') for language-specific filtering
+                            "page_number": {"type": "integer"},  # Page number where this chunk originated
+                            "chunk_index": {"type": "integer"},  # Sequential index of this chunk within the document
+                            "total_chunks": {"type": "integer"},  # Total number of chunks in the parent document
+                            "created_at": {"type": "date"}  # Timestamp when the chunk was indexed
+                        }
+                    }
                 }
             }
         }
@@ -131,17 +151,27 @@ class OpensearchVectorStore(VectorStore):
             logger.error(f"Failed to create index {self.index_name}: {e}")
             raise
 
+    @retry_on_transient_error(max_retries=3, initial_delay=5.0, backoff_multiplier=2.0)
     def insert_chunks(self, chunks, vectors=None, embedding=None, batch_size=10):
         """
-        Supports 2 modes of insertion
+        Supports 2 modes of insertion with retry logic for transient failures.
         1. Pure embedding: pass 'chunks' and 'vectors'
         2. Text chunks: pass 'chunks' and 'embedding' (class instance)
+
+        Args:
+            chunks: List of document chunks to insert (for a single document)
+            vectors: Pre-computed embeddings (optional)
+            embedding: Embedding instance to generate embeddings (optional)
+            batch_size: Number of chunks to insert per batch
+
+        Returns:
+            bool: True if indexing succeeded, False if it failed
         """
-        logger.info("Starting insert_chunks operation")
+        logger.debug("Starting insert_chunks operation")
 
         if not chunks:
             logger.debug("Nothing to chunk!")
-            return
+            return True
 
         logger.debug(f"Inserting {len(chunks)} chunks into OpenSearch with batch_size={batch_size}")
 
@@ -149,24 +179,26 @@ class OpensearchVectorStore(VectorStore):
         final_embeddings = vectors
         if vectors is not None and len(vectors) > 0:
             logger.debug(f"Using pre-computed vectors, dimension: {len(vectors[0])}")
-            # Initialize index using pre-computed vector dimension
+            # Initialize index using pre-computed vector dimension (only once)
             self._setup_index(len(vectors[0]))
-        else:
+        elif embedding is not None:
             logger.debug("Will generate embeddings using provided embedding instance")
+            # Generate first batch to get dimension and setup index once
+            first_batch = chunks[:min(batch_size, len(chunks))]
+            first_page_contents = [doc.get("page_content") for doc in first_batch]
+            first_embeddings = embedding.embed_documents(first_page_contents)
+            dim = len(first_embeddings[0])
+            self._setup_index(dim)
+            logger.debug(f"Index setup completed with dimension: {dim}")
 
         # Iterate through chunks in batches and insert in bulk
         for i in tqdm(range(0, len(chunks), batch_size)):
             batch = chunks[i:i + batch_size]
             page_contents = [doc.get("page_content") for doc in batch]
 
-            # Generate embeddings only for this specific batch
+            # Generate embeddings for this batch
             if vectors is None and embedding is not None:
                 current_batch_embeddings = embedding.embed_documents(page_contents)
-
-                # Initialize index on the first batch if not already done
-                if i == 0:
-                    dim = len(current_batch_embeddings[0])
-                    self._setup_index(dim)
             else:
                 # Use the relevant slice from pre-computed vectors
                 assert final_embeddings is not None, "final_embeddings must be set when vectors is provided"
@@ -183,18 +215,33 @@ class OpensearchVectorStore(VectorStore):
                 doc_id = doc.get("doc_id") or fn # Fallback to filename if UUID missing
                 cid = generate_chunk_id(doc_id, pc)
 
+                # Build metadata object with all fields
+                metadata = {
+                    "filename": fn,
+                    "doc_id": doc_id,
+                    "type": doc.get("type", ""),
+                    "source": doc.get("source", ""),
+                    "language": doc.get("language", "")
+                }
+                
+                # Add optional fields if they exist
+                if doc.get("page_number") is not None:
+                    metadata["page_number"] = doc.get("page_number")
+                if doc.get("chunk_index") is not None:
+                    metadata["chunk_index"] = doc.get("chunk_index")
+                if doc.get("total_chunks") is not None:
+                    metadata["total_chunks"] = doc.get("total_chunks")
+                if doc.get("created_at") is not None:
+                    metadata["created_at"] = doc.get("created_at")
+
                 actions.append({
                     "_index": self.index_name,
                     "_id": str(cid),
                     "_source": {
                         "chunk_id": cid,
                         "embedding": emb.tolist() if isinstance(emb, np.ndarray) else emb,
-                        "page_content": pc,
-                        "filename": fn,
-                        "doc_id": doc_id,
-                        "type": doc.get("type", ""),
-                        "source": doc.get("source", ""),
-                        "language": doc.get("language", "")
+                        "text": pc,
+                        "metadata": metadata
                     }
                 })
 
@@ -202,23 +249,41 @@ class OpensearchVectorStore(VectorStore):
             batch_num = i // batch_size + 1
 
             try:
-                success, failed = helpers.bulk(self.client, actions, stats_only=True, refresh=True)
-                if failed:
-                    logger.error(f"Failed to insert {failed} chunks in batch {batch_num} starting at index {i}")
-                    return
+                # Use bulk insert with error handling
+                success_count, errors = helpers.bulk(
+                    self.client,
+                    actions,
+                    stats_only=False,               # Get detailed error information for failed chunks
+                    raise_on_error=False,           # Continue indexing other chunks even if some fail
+                    refresh=True
+                )
 
-                inserted_doc_ids = list(set([action["_source"]["doc_id"] for action in actions]))
+                # If any errors occurred in this batch, the document failed
+                if errors:
+                    logger.debug(f"Batch {batch_num}: {len(errors)} chunks failed to insert")
+                    for error_item in errors:
+                        # OpenSearch returns errors in a dict format: {'index': {'_id': '...', 'error': ...}}
+                        action_type = list(error_item.keys())[0]
+                        error_detail = error_item[action_type]
+                        logger.error(f"Chunk insertion error: {error_detail.get('error', 'Unknown error')}")
+                    return False
+
+                logger.debug(f"Batch {batch_num}: {success_count} chunks inserted successfully")
+
             except Exception as e:
                 logger.error(f"Exception during bulk insert for batch {batch_num}: {e}")
                 raise
 
-        logger.info(f"Insert operation completed: {len(chunks)} chunks inserted into index {self.index_name}")
+        logger.info(f"Insert operation completed successfully: {len(chunks)} chunks inserted into index {self.index_name}")
+        return True
 
 
+    @retry_on_transient_error(max_retries=3, initial_delay=5.0, backoff_multiplier=2.0)
     def search(self, query_text, vector=None, embedding=None, top_k=5, mode=None, doc_id=None, language='en'):
         """
         Supported search modes: dense(semantic search), sparse(keyword match) and hybrid(combination of dense and sparse).
         Accepts either a pre-computed 'vector' OR an 'embedding' instance.
+        Includes retry logic for transient failures.
         """
         logger.debug(f"Starting search operation: query='{query_text[:50]}...', top_k={top_k}, mode={mode}, language={language}")
 
@@ -250,7 +315,7 @@ class OpensearchVectorStore(VectorStore):
             # 1. Define the k-NN search body
             search_body = {
                 "size": limit,
-                "_source": ["chunk_id", "page_content", "filename", "doc_id", "type", "source", "language"],
+                "_source": ["chunk_id", "text", "metadata"],
                 "query": {
                     "knn": {
                         "embedding": {
@@ -258,7 +323,7 @@ class OpensearchVectorStore(VectorStore):
                             "k": limit,
                             # Efficient pre-filtering
                             "filter": {
-                                "term": {"language": language}
+                                "term": {"metadata.language": language}
                             } if language else {"match_all": {}}
                         }
                     }
@@ -269,14 +334,14 @@ class OpensearchVectorStore(VectorStore):
             # Standard full-text match for sparse/keyword logic
             search_body = {
                 "size": limit,
-                "_source": ["chunk_id", "page_content", "filename", "doc_id", "type", "source", "language"],
+                "_source": ["chunk_id", "text", "metadata"],
                 "query": {
                     "bool": {
                         "must": [
-                            {"match": {"page_content": query}}
+                            {"match": {"text": query}}
                         ],
                         "filter": [
-                            {"term": {"language": language}}
+                            {"term": {"metadata.language": language}}
                         ] if language else []
                     }
                 }
@@ -285,7 +350,7 @@ class OpensearchVectorStore(VectorStore):
             # OpenSearch Hybrid Query combines Dense (k-NN) and Sparse (Match)
             search_body = {
                 "size": top_k, # Final number of results after fusion
-                "_source": ["chunk_id", "page_content", "filename", "doc_id", "type", "source", "language"],
+                "_source": ["chunk_id", "text", "metadata"],
                 "query": {
                     "hybrid": {
                         "queries": [
@@ -295,15 +360,15 @@ class OpensearchVectorStore(VectorStore):
                                     "embedding": {
                                         "vector": query_vector.tolist() if isinstance(query_vector, np.ndarray) else query_vector,
                                         "k": limit,
-                                        "filter": {"term": {"language": language}} if language else None
+                                        "filter": {"term": {"metadata.language": language}} if language else None
                                     }
                                 }
                             },
                             # 2. Sparse Component (BM25 Lexical)
                             {
                                 "bool": {
-                                    "must": [{"match": {"page_content": query}}],
-                                    "filter": [{"term": {"language": language}}] if language else []
+                                    "must": [{"match": {"text": query}}],
+                                    "filter": [{"term": {"metadata.language": language}}] if language else []
                                 }
                             }
                         ]
@@ -329,15 +394,31 @@ class OpensearchVectorStore(VectorStore):
         # Format results
         results = []
         for idx, hit in enumerate(response["hits"]["hits"]):
-            metadata = hit["_source"]
-            metadata["score"] = hit["_score"] # unified search score
-            results.append(metadata)
-            logger.debug(f"Result {idx+1}: doc_id={metadata.get('doc_id', 'N/A')}, score={hit['_score']:.4f}")
+            source = hit["_source"]
+            # Flatten the structure for backward compatibility
+            result = {
+                "chunk_id": source.get("chunk_id"),
+                "text": source.get("text"),
+                "page_content": source.get("text"),  # Alias for backward compatibility
+                "score": hit["_score"]
+            }
+            # Add metadata fields
+            if "metadata" in source:
+                result.update(source["metadata"])
+                result["metadata"] = source["metadata"]  # Keep nested structure too
+            
+            results.append(result)
+            logger.debug(f"Result {idx+1}: doc_id={result.get('doc_id', 'N/A')}, score={hit['_score']:.4f}")
 
         logger.debug(f"Search operation completed successfully with {len(results)} results")
         return results
 
+    @retry_on_transient_error(max_retries=3, initial_delay=5.0, backoff_multiplier=2.0)
     def check_db_populated(self):
+        """
+        Check if the database index exists and is populated.
+        Includes retry logic for transient failures.
+        """
         logger.debug(f"Checking if database is populated for index {self.index_name}")
 
         exists = self.client.indices.exists(index=self.index_name)
@@ -345,12 +426,13 @@ class OpensearchVectorStore(VectorStore):
         return exists
 
 
+    @retry_on_transient_error(max_retries=3, initial_delay=5.0, backoff_multiplier=2.0)
     def remove_docs_from_index(self, doc_ids: list[str]):
         """
         Delete all chunks associated with the specified document IDs from the index.
 
         This performs a targeted deletion of documents rather than wiping the entire index.
-        Uses batch deletion for efficiency.
+        Uses batch deletion for efficiency. Includes retry logic for transient failures.
 
         Args:
             doc_ids: List of document IDs whose chunks should be deleted from the index
@@ -368,39 +450,36 @@ class OpensearchVectorStore(VectorStore):
             logger.info(f"Index {self.index_name} does not exist.")
             return 0
 
-        try:
-            # Construct terms query for batch deletion
-            # 'doc_id' must be the keyword field in your mapping
-            delete_query = {
-                "query": {
-                    "terms": {
-                        "doc_id": doc_ids
-                    }
+        # Construct terms query for batch deletion
+        # 'metadata.doc_id' is the nested keyword field in the mapping
+        delete_query = {
+            "query": {
+                "terms": {
+                    "metadata.doc_id": doc_ids
                 }
             }
+        }
 
-            response = self.client.delete_by_query(
-                index=self.index_name,
-                body=delete_query,
-                params={
-                    "refresh": "true",
-                    "conflicts": "proceed"
-                }
-            )
+        response = self.client.delete_by_query(
+            index=self.index_name,
+            body=delete_query,
+            params={
+                "refresh": "true",
+                "conflicts": "proceed"
+            }
+        )
 
-            deleted_count = response.get("deleted", 0)
-            logger.info(f"Successfully deleted {deleted_count} chunks for {len(doc_ids)} documents from {self.index_name}")
-
-        except Exception as e:
-            logger.error(f"Failed to delete documents from index {self.index_name}: {e}")
-            raise
+        deleted_count = response.get("deleted", 0)
+        logger.info(f"Successfully deleted {deleted_count} chunks for {len(doc_ids)} documents from {self.index_name}")
 
         return deleted_count
 
 
+    @retry_on_transient_error(max_retries=3, initial_delay=5.0, backoff_multiplier=2.0)
     def delete_document_by_id(self, doc_id: str):
         """
         Delete all chunks associated with a specific document from the index.
+        Includes retry logic for transient failures.
 
         Args:
             doc_id: The unique identifier of the document to delete
@@ -414,48 +493,44 @@ class OpensearchVectorStore(VectorStore):
             logger.error(f"Index {self.index_name} does not exist, nothing to delete")
             return 0
 
-        try:
-            # 1. Immediate Refresh (Safety Check)
-            # If a user ingests and then deletes immediately, OpenSearch might not have 'seen' the documents yet
-            self.client.indices.refresh(index=self.index_name)
+        # 1. Immediate Refresh (Safety Check)
+        # If a user ingests and then deletes immediately, OpenSearch might not have 'seen' the documents yet
+        self.client.indices.refresh(index=self.index_name)
 
-            # STEP 2: Perform the actual deletion
-            delete_query = {
-                "query": {
-                    "term": {
-                        "doc_id": str(doc_id).strip()
-                    }
+        # STEP 2: Perform the actual deletion
+        delete_query = {
+            "query": {
+                "term": {
+                    "metadata.doc_id": str(doc_id).strip()
                 }
             }
+        }
 
-            response = self.client.delete_by_query(
-                index=self.index_name,
-                body=delete_query,
-                params={
-                            "refresh": "true",             # Update index stats immediately
-                            "conflicts": "proceed",        # Ignore locks from concurrent indexing
-                            "wait_for_completion": "true"  # Synchronous for the API response
-                        },
-            )
+        response = self.client.delete_by_query(
+            index=self.index_name,
+            body=delete_query,
+            params={
+                        "refresh": "true",             # Update index stats immediately
+                        "conflicts": "proceed",        # Ignore locks from concurrent indexing
+                        "wait_for_completion": "true"  # Synchronous for the API response
+                    },
+        )
 
-            deleted_count = response.get("deleted", 0)
-            total_matched = response.get("total", 0)
-            failures = response.get("failures", [])
+        deleted_count = response.get("deleted", 0)
+        total_matched = response.get("total", 0)
+        failures = response.get("failures", [])
 
-            # Log detailed response for debugging
-            logger.debug(f"delete_by_query response: took={response.get('took')}ms, total={total_matched}, deleted={deleted_count}, failures={len(failures)}")
+        # Log detailed response for debugging
+        logger.debug(f"delete_by_query response: took={response.get('took')}ms, total={total_matched}, deleted={deleted_count}, failures={len(failures)}")
 
-            if failures:
-                logger.error(f"Deletion failures for document {doc_id}: {failures}")
+        if failures:
+            logger.error(f"Deletion failures for document {doc_id}: {failures}")
 
-            if deleted_count > 0:
-                logger.info(f"✓ Deleted {deleted_count} chunks for document {doc_id} from index {self.index_name}")
+        if deleted_count > 0:
+            logger.info(f"✓ Deleted {deleted_count} chunks for document {doc_id} from index {self.index_name}")
+        else:
+            if total_matched == 0:
+                logger.info(f"Deleted {deleted_count} chunks for document {doc_id} from index {self.index_name} (no matching documents found)")
             else:
-                if total_matched == 0:
-                    logger.info(f"Deleted {deleted_count} chunks for document {doc_id} from index {self.index_name} (no matching documents found)")
-                else:
-                    logger.error(f"Matched {total_matched} documents but deleted {deleted_count} for document {doc_id} (possible version conflicts or failures)")
-            return deleted_count
-        except Exception as e:
-            logger.error(f"Failed to delete document {doc_id} from index: {e}")
-            raise
+                logger.error(f"Matched {total_matched} documents but deleted {deleted_count} for document {doc_id} (possible version conflicts or failures)")
+        return deleted_count

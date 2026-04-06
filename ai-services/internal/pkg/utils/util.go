@@ -5,6 +5,7 @@ import (
 	"maps"
 	"net"
 	"os"
+	"regexp"
 	"strings"
 
 	"github.com/project-ai-services/ai-services/internal/pkg/logger"
@@ -16,8 +17,14 @@ import (
 )
 
 const (
-	maxKeyValueParts = 2
+	maxKeyValueParts  = 2
+	maxHostnameLength = 63
 )
+
+// IsTransientK8sError checks if a Kubernetes API error is transient and should be retried.
+func IsTransientK8sError(err error) bool {
+	return apierrors.IsTooManyRequests(err) || apierrors.IsServerTimeout(err) || apierrors.IsTimeout(err)
+}
 
 // BoolPtr -> converts to bool ptr.
 func BoolPtr(v bool) *bool {
@@ -243,9 +250,24 @@ func SetNestedValue(out map[string]any, dottedKey string, value any) {
 	current[last] = value
 }
 
+// rfc1035HostnameRegex validates RFC 1035 hostname format:
+// - 1-63 characters.
+// - lowercase letters, numbers, and hyphens only.
+// - must start with a letter.
+// - must end with a letter or number.
+var rfc1035HostnameRegex = regexp.MustCompile(`^[a-z]([a-z0-9-]{0,61}[a-z0-9])?$`)
+
 func VerifyAppName(appName string) error {
-	if appName == "" || strings.Contains(appName, "..") || strings.ContainsAny(appName, "/\\") {
-		return fmt.Errorf("invalid application name: %s", appName)
+	if appName == "" {
+		return fmt.Errorf("application name cannot be empty")
+	}
+
+	if len(appName) > maxHostnameLength {
+		return fmt.Errorf("invalid application name '%s': must be %d characters or less", appName, maxHostnameLength)
+	}
+
+	if !rfc1035HostnameRegex.MatchString(appName) {
+		return fmt.Errorf("invalid application name '%s': must be a valid RFC 1035 hostname (lowercase letters, numbers, and hyphens only; must start with a letter and end with a letter or number)", appName)
 	}
 
 	return nil
@@ -314,6 +336,11 @@ func GetExistingCustomResource(client *openshift.OpenshiftClient, gvk schema.Gro
 		if apierrors.IsNotFound(err) {
 			return nil, false, nil
 		}
+		// Handle rate limiting and other transient errors as retryable by returning them
+		// The caller's polling loop will retry
+		if IsTransientK8sError(err) {
+			return nil, false, err
+		}
 
 		return nil, false, fmt.Errorf("error listing %s: %w", gvk.Kind, err)
 	}
@@ -323,4 +350,27 @@ func GetExistingCustomResource(client *openshift.OpenshiftClient, gvk schema.Gro
 	}
 
 	return &list.Items[0], true, nil
+}
+
+// FlattenMapToKeys converts a nested map into a flat map with dotted keys
+// Example: {"ui": {"port": "8080"}} -> {"ui.port": ""}.
+func FlattenMapToKeys(m map[string]any, prefix string) map[string]string {
+	result := make(map[string]string)
+	for key, val := range m {
+		fullKey := key
+		if prefix != "" {
+			fullKey = prefix + "." + key
+		}
+
+		// If the value is a nested map, recurse
+		if nestedMap, ok := val.(map[string]any); ok {
+			nestedKeys := FlattenMapToKeys(nestedMap, fullKey)
+			maps.Copy(result, nestedKeys)
+		} else {
+			// For leaf values, add the key
+			result[fullKey] = ""
+		}
+	}
+
+	return result
 }
