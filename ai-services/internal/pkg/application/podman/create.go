@@ -3,10 +3,14 @@ package podman
 import (
 	"bytes"
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"io"
+	"net"
+	"os"
 	"os/exec"
+	"path/filepath"
 	"slices"
 	"strconv"
 	"strings"
@@ -22,6 +26,7 @@ import (
 	"github.com/project-ai-services/ai-services/internal/pkg/logger"
 	"github.com/project-ai-services/ai-services/internal/pkg/models"
 	"github.com/project-ai-services/ai-services/internal/pkg/runtime/podman"
+	runtimeTypes "github.com/project-ai-services/ai-services/internal/pkg/runtime/types"
 	"github.com/project-ai-services/ai-services/internal/pkg/specs"
 	"github.com/project-ai-services/ai-services/internal/pkg/spinner"
 	"github.com/project-ai-services/ai-services/internal/pkg/utils"
@@ -585,6 +590,22 @@ func (p *PodmanApplication) deployPodAndReadinessCheck(podSpec *models.PodSpec,
 			logger.Infoln("-------")
 		}
 		logger.Infof("'%s', '%s': Pod has been successfully deployed and ready!\n", podTemplateName, podName)
+
+		// Step3: ---- Write Runtime Config (only if annotation is set) ----
+		// Check if runtime config annotation is enabled
+		if runtimeConfigEnabled := pInfo.Labels["ai-services.io/runtime-config"]; runtimeConfigEnabled == "true" {
+			// Extract app name from pod labels
+			appName := pInfo.Labels["ai-services.io/application"]
+			if appName != "" && len(pInfo.Ports) > 0 {
+				if err := p.writeRuntimeConfig(pInfo, appName); err != nil {
+					logger.Warningf("'%s', '%s': Failed to write runtime config: %v\n", podTemplateName, podName, err)
+					// Don't fail the deployment if runtime config write fails
+				} else {
+					logger.Infof("'%s', '%s': Runtime config written successfully\n", podTemplateName, podName)
+				}
+			}
+		}
+
 		logger.Infoln("-------")
 	}
 
@@ -724,4 +745,74 @@ func (p *PodmanApplication) fetchHostPortMappingFromAnnotation(podAnnotations ma
 	}
 
 	return hostPortMapping
+}
+
+// RuntimeConfig represents the runtime configuration written to the mounted volume
+type RuntimeConfig struct {
+	HostIP  string            `json:"host_ip"`
+	Ports   map[string]string `json:"ports"` // containerPort -> hostPort
+	PodName string            `json:"pod_name"`
+	PodID   string            `json:"pod_id"`
+	AppName string            `json:"app_name"`
+	Created string            `json:"created"`
+}
+
+// writeRuntimeConfig writes pod runtime information to a config file in the mounted volume
+func (p *PodmanApplication) writeRuntimeConfig(podInfo *runtimeTypes.Pod, appName string) error {
+	// Get host IP
+	hostIP, err := getHostIP()
+	if err != nil {
+		logger.Warningf("Failed to get host IP, using 0.0.0.0: %v\n", err)
+		hostIP = "0.0.0.0"
+	}
+
+	// Convert port mappings to simple map
+	ports := make(map[string]string)
+	for containerPort, hostPorts := range podInfo.Ports {
+		if len(hostPorts) > 0 {
+			ports[containerPort] = hostPorts[0]
+		}
+	}
+
+	config := RuntimeConfig{
+		HostIP:  hostIP,
+		Ports:   ports,
+		PodName: podInfo.Name,
+		PodID:   podInfo.ID,
+		AppName: appName,
+		Created: time.Now().UTC().Format(time.RFC3339),
+	}
+
+	// Create runtime config directory
+	runtimeDir := filepath.Join("/var/lib/ai-services/runtime", podInfo.Name)
+	if err := os.MkdirAll(runtimeDir, 0755); err != nil {
+		return fmt.Errorf("failed to create runtime config directory: %w", err)
+	}
+
+	// Write config file
+	configPath := filepath.Join(runtimeDir, "config.json")
+	data, err := json.MarshalIndent(config, "", "  ")
+	if err != nil {
+		return fmt.Errorf("failed to marshal runtime config: %w", err)
+	}
+
+	if err := os.WriteFile(configPath, data, 0644); err != nil {
+		return fmt.Errorf("failed to write runtime config: %w", err)
+	}
+
+	logger.Infof("Runtime config written to: %s\n", configPath, logger.VerbosityLevelDebug)
+	return nil
+}
+
+// getHostIP attempts to determine the host's primary IP address
+func getHostIP() (string, error) {
+	// Try to get the outbound IP by connecting to a public DNS server
+	conn, err := net.Dial("udp", "8.8.8.8:80")
+	if err != nil {
+		return "", err
+	}
+	defer conn.Close()
+
+	localAddr := conn.LocalAddr().(*net.UDPAddr)
+	return localAddr.IP.String(), nil
 }

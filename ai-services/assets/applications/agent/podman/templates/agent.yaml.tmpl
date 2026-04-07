@@ -8,7 +8,13 @@ metadata:
     ai-services.io/version: "{{ .Version }}"
   annotations:
     ai-services.io/ports: "{{ or .Values.agent.port }}:9000"
+    ai-services.io/runtime-config: "true"
 spec:
+  volumes:
+    - name: runtime-config
+      hostPath:
+        path: /var/lib/ai-services/runtime/{{ .AppName }}--agent
+        type: DirectoryOrCreate
   containers:
     - name: agent
       image: "{{ .Values.agent.image }}"
@@ -29,6 +35,11 @@ spec:
           value: "9000"
         - name: LOG_LEVEL
           value: "{{ .Values.agent.log_level }}"
+        - name: RUNTIME_CONFIG_PATH
+          value: "/runtime/config.json"
+      volumeMounts:
+        - name: runtime-config
+          mountPath: /runtime
       resources:
         requests:
           memory: "256Mi"

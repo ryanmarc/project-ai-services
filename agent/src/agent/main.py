@@ -4,7 +4,7 @@ import argparse
 import logging
 import sys
 
-from agent.config import Settings
+from agent.config import RuntimeConfig, Settings
 
 
 def build_llm(settings: Settings):
@@ -91,10 +91,29 @@ def run_server(settings: Settings) -> None:
     from agent.a2a.agent_card import build_agent_card
     from agent.a2a.task_handler import AgentTaskHandler
 
+    # Load runtime config
+    runtime_config = RuntimeConfig(settings.runtime_config_path)
+
+    # Determine the public host and port from runtime config
+    container_port = str(settings.agent_port)
+    mapped_port = runtime_config.get_host_port(container_port)
+
+    # Use runtime config values if available, otherwise fall back to settings
+    if runtime_config.host_ip and mapped_port:
+        public_host = runtime_config.host_ip
+        public_port = int(mapped_port)
+        logging.info(f"Using runtime config: public URL will be http://{public_host}:{public_port}")
+        logging.info(f"Container port {container_port} mapped to host port {mapped_port}")
+    else:
+        public_host = settings.agent_host
+        public_port = settings.agent_port
+        logging.info(f"Runtime config not available, using default: http://{public_host}:{public_port}")
+
     llm = build_llm(settings)
     registry = build_registry(settings)
 
-    agent_card = build_agent_card(host=settings.agent_host, port=settings.agent_port)
+    # Use public host/port for agent card so external agents can reach us
+    agent_card = build_agent_card(host=public_host, port=public_port)
     task_handler = AgentTaskHandler(
         llm=llm, registry=registry, max_iterations=settings.max_tool_iterations
     )
@@ -110,6 +129,7 @@ def run_server(settings: Settings) -> None:
 
     import uvicorn
 
+    # Server still binds to the container's internal port
     uvicorn.run(
         app.build(),
         host=settings.agent_host,
