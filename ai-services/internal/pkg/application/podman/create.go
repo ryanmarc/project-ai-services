@@ -575,23 +575,7 @@ func (p *PodmanApplication) deployPodAndReadinessCheck(podSpec *models.PodSpec,
 
 		podName := pInfo.Name
 
-		logger.Infof("'%s', '%s': Starting Pod Readiness check...\n", podTemplateName, podName)
-
-		// Step1: ---- Containers Creation Check ----
-		if err := p.doContainersCreationCheck(podSpec, podTemplateName, pInfo.Name, pInfo.ID); err != nil {
-			return err
-		}
-
-		// Step2: ---- Containers Readiness Check ----
-		for _, container := range pInfo.Containers {
-			if err := p.doContainerReadinessCheck(podTemplateName, pInfo.Name, container.ID); err != nil {
-				return err
-			}
-			logger.Infoln("-------")
-		}
-		logger.Infof("'%s', '%s': Pod has been successfully deployed and ready!\n", podTemplateName, podName)
-
-		// Step3: ---- Write Runtime Config (only if annotation is set) ----
+		// ---- Write Runtime Config BEFORE readiness checks (so it's available when container starts) ----
 		// Check container annotations for runtime-config (annotations are on containers, not pods)
 		runtimeConfigEnabled := false
 		for _, container := range pInfo.Containers {
@@ -619,6 +603,21 @@ func (p *PodmanApplication) deployPodAndReadinessCheck(podSpec *models.PodSpec,
 			}
 		}
 
+		logger.Infof("'%s', '%s': Starting Pod Readiness check...\n", podTemplateName, podName)
+
+		// Step1: ---- Containers Creation Check ----
+		if err := p.doContainersCreationCheck(podSpec, podTemplateName, pInfo.Name, pInfo.ID); err != nil {
+			return err
+		}
+
+		// Step2: ---- Containers Readiness Check ----
+		for _, container := range pInfo.Containers {
+			if err := p.doContainerReadinessCheck(podTemplateName, pInfo.Name, container.ID); err != nil {
+				return err
+			}
+			logger.Infoln("-------")
+		}
+		logger.Infof("'%s', '%s': Pod has been successfully deployed and ready!\n", podTemplateName, podName)
 		logger.Infoln("-------")
 	}
 
