@@ -95,8 +95,12 @@ def run_server(settings: Settings) -> None:
     runtime_config = RuntimeConfig(settings.runtime_config_path)
 
     # Determine the public host and port from runtime config
+    # Port keys in config have /tcp suffix, so try both formats
     container_port = str(settings.agent_port)
     mapped_port = runtime_config.get_host_port(container_port)
+    if not mapped_port:
+        # Try with /tcp suffix
+        mapped_port = runtime_config.get_host_port(f"{container_port}/tcp")
 
     # Use runtime config values if available, otherwise fall back to settings
     if runtime_config.host_ip and mapped_port:
