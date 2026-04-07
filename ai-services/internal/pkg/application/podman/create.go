@@ -592,8 +592,21 @@ func (p *PodmanApplication) deployPodAndReadinessCheck(podSpec *models.PodSpec,
 		logger.Infof("'%s', '%s': Pod has been successfully deployed and ready!\n", podTemplateName, podName)
 
 		// Step3: ---- Write Runtime Config (only if annotation is set) ----
-		// Check if runtime config annotation is enabled
-		if runtimeConfigEnabled := pInfo.Labels["ai-services.io/runtime-config"]; runtimeConfigEnabled == "true" {
+		// Check container annotations for runtime-config (annotations are on containers, not pods)
+		runtimeConfigEnabled := false
+		for _, container := range pInfo.Containers {
+			cInfo, err := p.runtime.InspectContainer(container.ID)
+			if err != nil {
+				logger.Warningf("Failed to inspect container %s: %v\n", container.ID, err)
+				continue
+			}
+			if cInfo.Annotations["ai-services.io/runtime-config"] == "true" {
+				runtimeConfigEnabled = true
+				break
+			}
+		}
+
+		if runtimeConfigEnabled {
 			// Extract app name from pod labels
 			appName := pInfo.Labels["ai-services.io/application"]
 			if appName != "" && len(pInfo.Ports) > 0 {
