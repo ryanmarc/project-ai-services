@@ -3,9 +3,11 @@ package main
 import (
 	"fmt"
 	"log"
+	"net/http"
 	"os"
 	"strings"
 
+	"github.com/IBM/project-ai-services/wiki-service/internal/api"
 	"github.com/IBM/project-ai-services/wiki-service/internal/ingest"
 	"github.com/IBM/project-ai-services/wiki-service/internal/llm"
 	"github.com/IBM/project-ai-services/wiki-service/internal/query"
@@ -37,6 +39,9 @@ func main() {
 	if len(os.Args) > 1 {
 		command := os.Args[1]
 		switch command {
+		case "serve":
+			handleServe(wikiManager, llmClient, config)
+			return
 		case "ingest":
 			handleIngest(wikiManager, llmClient, os.Args[2:])
 			return
@@ -63,6 +68,27 @@ func main() {
 	fmt.Printf("LLM endpoint: %s\n", config.LLM.Endpoint)
 	fmt.Printf("LLM model: %s\n", config.LLM.Model)
 	fmt.Println("\nRun 'wiki-service help' for usage information")
+}
+
+// handleServe starts the API server
+func handleServe(wikiManager *wiki.Manager, llmClient *llm.Client, config Config) {
+	// Get API configuration
+	apiHost := getEnv("API_HOST", "0.0.0.0")
+	apiPort := getEnvInt("API_PORT", 8080)
+
+	// Create API server
+	server := api.NewServer(wikiManager, llmClient, config.Wiki)
+	router := server.SetupRoutes()
+
+	// Start server
+	addr := fmt.Sprintf("%s:%d", apiHost, apiPort)
+	log.Printf("Starting Wiki Service API server on %s", addr)
+	log.Printf("API endpoints available at http://%s/v1/wiki", addr)
+	log.Printf("Health check at http://%s/health", addr)
+
+	if err := http.ListenAndServe(addr, router); err != nil {
+		log.Fatalf("Server failed to start: %v", err)
+	}
 }
 
 // handleIngest processes document ingestion
@@ -245,22 +271,26 @@ func printHelp() {
 	fmt.Println("\nUsage:")
 	fmt.Println("  wiki-service [command] [arguments]")
 	fmt.Println("\nCommands:")
+	fmt.Println("  serve               Start the REST API server")
 	fmt.Println("  ingest <file>       Ingest a document into the wiki")
 	fmt.Println("  query <question>    Query the wiki (use --save to save result)")
 	fmt.Println("  stats               Show wiki statistics")
 	fmt.Println("  help                Show this help message")
 	fmt.Println("\nExamples:")
+	fmt.Println("  wiki-service serve")
 	fmt.Println("  wiki-service ingest document.txt")
 	fmt.Println("  wiki-service query \"What is machine learning?\"")
 	fmt.Println("  wiki-service query \"How does X compare to Y?\" --save")
 	fmt.Println("  wiki-service stats")
 	fmt.Println("\nEnvironment Variables:")
-	fmt.Println("  WIKI_DATA_DIR           Wiki data directory (default: ./wiki-data)")
+	fmt.Println("  WIKI_DATA_DIR            Wiki data directory (default: ./wiki-data)")
 	fmt.Println("  WIKI_MAX_PAGES_PER_QUERY Max pages to read per query (default: 10)")
-	fmt.Println("  LLM_ENDPOINT            LLM API endpoint (default: http://localhost:8000)")
-	fmt.Println("  LLM_MODEL               LLM model name (default: ibm-granite/granite-3.3-8b-instruct)")
-	fmt.Println("  LLM_MAX_TOKENS          Max tokens for LLM (default: 4096)")
-	fmt.Println("  LLM_TEMPERATURE         LLM temperature (default: 0.2)")
+	fmt.Println("  API_HOST                 API server host (default: 0.0.0.0)")
+	fmt.Println("  API_PORT                 API server port (default: 8080)")
+	fmt.Println("  LLM_ENDPOINT             LLM API endpoint (default: http://localhost:8000)")
+	fmt.Println("  LLM_MODEL                LLM model name (default: ibm-granite/granite-3.3-8b-instruct)")
+	fmt.Println("  LLM_MAX_TOKENS           Max tokens for LLM (default: 4096)")
+	fmt.Println("  LLM_TEMPERATURE          LLM temperature (default: 0.2)")
 }
 
 // Config holds all configuration
