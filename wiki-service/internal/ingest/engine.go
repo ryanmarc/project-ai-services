@@ -66,25 +66,33 @@ func (e *Engine) Ingest(request types.IngestRequest) (*types.IngestResponse, err
 
 	// Create entity pages
 	for _, entity := range analysis.Entities {
-		pagePath, err := e.createEntityPage(entity, analysis.Summary)
+		pagePath, wasUpdated, err := e.createEntityPage(entity, analysis.Summary)
 		if err != nil {
-			// Log error but continue (page might already exist)
-			fmt.Printf("Warning: failed to create entity page for %s: %v\n", entity.Name, err)
+			// Log error but continue
+			fmt.Printf("Warning: failed to create/update entity page for %s: %v\n", entity.Name, err)
 			continue
 		}
-		response.PagesCreated = append(response.PagesCreated, pagePath)
+		if wasUpdated {
+			response.PagesUpdated = append(response.PagesUpdated, pagePath)
+		} else {
+			response.PagesCreated = append(response.PagesCreated, pagePath)
+		}
 		response.EntitiesFound = append(response.EntitiesFound, entity.Name)
 	}
 
 	// Create concept pages
 	for _, concept := range analysis.Concepts {
-		pagePath, err := e.createConceptPage(concept, analysis.Summary)
+		pagePath, wasUpdated, err := e.createConceptPage(concept, analysis.Summary)
 		if err != nil {
-			// Log error but continue (page might already exist)
-			fmt.Printf("Warning: failed to create concept page for %s: %v\n", concept.Name, err)
+			// Log error but continue
+			fmt.Printf("Warning: failed to create/update concept page for %s: %v\n", concept.Name, err)
 			continue
 		}
-		response.PagesCreated = append(response.PagesCreated, pagePath)
+		if wasUpdated {
+			response.PagesUpdated = append(response.PagesUpdated, pagePath)
+		} else {
+			response.PagesCreated = append(response.PagesCreated, pagePath)
+		}
 		response.ConceptsFound = append(response.ConceptsFound, concept.Name)
 	}
 
@@ -155,49 +163,88 @@ func (e *Engine) createSourceSummaryPage(sourceTitle string, analysis *IngestAna
 	return pagePath, nil
 }
 
-// createEntityPage creates a page for an entity
-func (e *Engine) createEntityPage(entity Entity, relatedInfo string) (string, error) {
+// createEntityPage creates a page for an entity or updates it if it exists
+func (e *Engine) createEntityPage(entity Entity, relatedInfo string) (string, bool, error) {
 	// Generate page content with LLM
 	prompt := EntityPageContentPrompt(entity.Name, entity.Type, entity.Description, relatedInfo)
 	systemPrompt := "You are a knowledge management assistant. Generate well-structured markdown content."
 
 	content, err := e.llmClient.Complete(systemPrompt, prompt)
 	if err != nil {
-		return "", fmt.Errorf("failed to generate entity page: %w", err)
+		return "", false, fmt.Errorf("failed to generate entity page: %w", err)
 	}
 
-	// Create page
+	// Try to create page
 	pagePath, err := e.wikiManager.CreatePage("entities", entity.Name, content)
 	if err != nil {
-		// Check if page already exists - if so, we might want to update it
+		// Check if page already exists - if so, update it
 		if strings.Contains(err.Error(), "already exists") {
-			return "", fmt.Errorf("entity page already exists: %s", entity.Name)
+			// Page exists, update it with new information
+			pagePath, err := e.updateExistingPageWithLLM("entities", entity.Name, content)
+			if err != nil {
+				return "", false, fmt.Errorf("failed to update entity page: %w", err)
+			}
+			return pagePath, true, nil // true = updated
 		}
-		return "", fmt.Errorf("failed to create entity page: %w", err)
+		return "", false, fmt.Errorf("failed to create entity page: %w", err)
 	}
 
-	return pagePath, nil
+	return pagePath, false, nil // false = created
 }
 
-// createConceptPage creates a page for a concept
-func (e *Engine) createConceptPage(concept Concept, relatedInfo string) (string, error) {
+// createConceptPage creates a page for a concept or updates it if it exists
+func (e *Engine) createConceptPage(concept Concept, relatedInfo string) (string, bool, error) {
 	// Generate page content with LLM
 	prompt := ConceptPageContentPrompt(concept.Name, concept.Description, relatedInfo)
 	systemPrompt := "You are a knowledge management assistant. Generate well-structured markdown content."
 
 	content, err := e.llmClient.Complete(systemPrompt, prompt)
 	if err != nil {
-		return "", fmt.Errorf("failed to generate concept page: %w", err)
+		return "", false, fmt.Errorf("failed to generate concept page: %w", err)
 	}
 
-	// Create page
+	// Try to create page
 	pagePath, err := e.wikiManager.CreatePage("concepts", concept.Name, content)
 	if err != nil {
-		// Check if page already exists
+		// Check if page already exists - if so, update it
 		if strings.Contains(err.Error(), "already exists") {
-			return "", fmt.Errorf("concept page already exists: %s", concept.Name)
+			// Page exists, update it with new information
+			pagePath, err := e.updateExistingPageWithLLM("concepts", concept.Name, content)
+			if err != nil {
+				return "", false, fmt.Errorf("failed to update concept page: %w", err)
+			}
+			return pagePath, true, nil // true = updated
 		}
-		return "", fmt.Errorf("failed to create concept page: %w", err)
+		return "", false, fmt.Errorf("failed to create concept page: %w", err)
+	}
+
+	return pagePath, false, nil // false = created
+}
+
+// updateExistingPageWithLLM updates an existing page by merging new content with LLM
+func (e *Engine) updateExistingPageWithLLM(category, title, newContent string) (string, error) {
+	// Construct the page path
+	filename := sanitizeFilename(title) + ".md"
+	pagePath := filepath.Join(category, filename)
+
+	// Read existing page content
+	existingContent, err := e.wikiManager.ReadPage(pagePath)
+	if err != nil {
+		return "", fmt.Errorf("failed to read existing page: %w", err)
+	}
+
+	// Use LLM to merge the content
+	prompt := UpdateExistingPagePrompt(pagePath, existingContent, newContent)
+	systemPrompt := "You are a knowledge management assistant. Merge new information into existing wiki pages while preserving structure and adding cross-references."
+
+	mergedContent, err := e.llmClient.Complete(systemPrompt, prompt)
+	if err != nil {
+		return "", fmt.Errorf("failed to merge content with LLM: %w", err)
+	}
+
+	// Update the page
+	if err := e.wikiManager.UpdatePage(pagePath, mergedContent); err != nil {
+		return "", fmt.Errorf("failed to update page: %w", err)
 	}
 
 	return pagePath, nil
@@ -255,19 +302,27 @@ func (e *Engine) updateIndexForIngest(sourceTitle, sourcePath string, analysis *
 
 // createLogEntry creates a log entry for the ingestion
 func (e *Engine) createLogEntry(sourceTitle string, response *types.IngestResponse) types.LogEntry {
-	details := fmt.Sprintf(`- Created: %s
-- Entities found: %d (%s)
-- Concepts found: %d (%s)
-- Pages created: %d
-- Summary: %s`,
-		strings.Join(response.PagesCreated, ", "),
-		len(response.EntitiesFound),
-		strings.Join(response.EntitiesFound, ", "),
-		len(response.ConceptsFound),
-		strings.Join(response.ConceptsFound, ", "),
-		len(response.PagesCreated),
-		truncateSummary(response.Summary, 200),
+	var detailsParts []string
+
+	if len(response.PagesCreated) > 0 {
+		detailsParts = append(detailsParts, fmt.Sprintf("- Pages created: %d (%s)",
+			len(response.PagesCreated), strings.Join(response.PagesCreated, ", ")))
+	}
+
+	if len(response.PagesUpdated) > 0 {
+		detailsParts = append(detailsParts, fmt.Sprintf("- Pages updated: %d (%s)",
+			len(response.PagesUpdated), strings.Join(response.PagesUpdated, ", ")))
+	}
+
+	detailsParts = append(detailsParts,
+		fmt.Sprintf("- Entities found: %d (%s)",
+			len(response.EntitiesFound), strings.Join(response.EntitiesFound, ", ")),
+		fmt.Sprintf("- Concepts found: %d (%s)",
+			len(response.ConceptsFound), strings.Join(response.ConceptsFound, ", ")),
+		fmt.Sprintf("- Summary: %s", truncateSummary(response.Summary, 200)),
 	)
+
+	details := strings.Join(detailsParts, "\n")
 
 	return types.LogEntry{
 		Timestamp: time.Now(),
