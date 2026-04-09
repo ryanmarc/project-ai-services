@@ -1,0 +1,94 @@
+# Kubernetes: Container Orchestration Platform
+
+Kubernetes, also known as K8s, is an open-source container orchestration platform that automates the deployment, scaling, and management of containerized applications. Originally developed by Google, it is now maintained by the Cloud Native Computing Foundation (CNCF).
+
+## Core Concepts
+
+### Pods
+A Pod is the smallest deployable unit in Kubernetes. It represents a single instance of a running process in a cluster and can contain one or more containers that share storage and network resources.
+
+### Services
+Services provide a stable network endpoint to access a set of Pods. They enable load balancing and service discovery within the cluster.
+
+### Deployments
+Deployments manage the desired state of Pods and ReplicaSets. They provide declarative updates and rollback capabilities for applications.
+
+### Namespaces
+Namespaces provide a mechanism for isolating groups of resources within a single cluster. They are useful for dividing cluster resources between multiple users or teams.
+
+## Architecture
+
+### Control Plane Components
+- **API Server**: The front-end for the Kubernetes control plane
+- **etcd**: Consistent and highly-available key-value store for cluster data
+- **Scheduler**: Assigns Pods to nodes based on resource requirements
+- **Controller Manager**: Runs controller processes to regulate cluster state
+
+### Node Components
+- **kubelet**: Agent that runs on each node and manages Pods
+- **kube-proxy**: Network proxy that maintains network rules
+- **Container Runtime**: Software responsible for running containers (e.g., containerd, CRI-O)
+
+## Key Features
+
+### Automatic Scaling
+Kubernetes can automatically scale applications based on CPU utilization or custom metrics using Horizontal Pod Autoscaler (HPA) and Vertical Pod Autoscaler (VPA).
+
+### Self-Healing
+The platform automatically restarts failed containers, replaces containers, kills containers that don't respond to health checks, and doesn't advertise them to clients until they are ready.
+
+### Service Discovery and Load Balancing
+Kubernetes can expose containers using DNS names or IP addresses and distribute network traffic to ensure stable deployments.
+
+### Storage Orchestration
+Automatically mount storage systems of your choice, whether from local storage, public cloud providers, or network storage systems.
+
+## Networking
+
+Kubernetes networking addresses four concerns:
+1. Container-to-container communications within a Pod
+2. Pod-to-Pod communications across nodes
+3. Pod-to-Service communications
+4. External-to-Service communications
+
+## Security
+
+### RBAC (Role-Based Access Control)
+Kubernetes uses RBAC to regulate access to resources based on the roles of individual users within an organization.
+
+### Network Policies
+Network Policies specify how groups of Pods are allowed to communicate with each other and other network endpoints.
+
+### Pod Security Standards
+Define security policies at different levels (Privileged, Baseline, Restricted) to enforce security best practices.
+
+## Ecosystem
+
+The Kubernetes ecosystem includes:
+- **Helm**: Package manager for Kubernetes
+- **Istio**: Service mesh for microservices
+- **Prometheus**: Monitoring and alerting toolkit
+- **Fluentd**: Log aggregation
+- **Operators**: Method of packaging, deploying, and managing Kubernetes applications
+
+## Use Cases
+
+Kubernetes is widely used for:
+- Microservices architectures
+- Continuous Integration/Continuous Deployment (CI/CD)
+- Hybrid and multi-cloud deployments
+- Machine learning workloads
+- Batch processing
+- Stateful applications with StatefulSets
+
+## Best Practices
+
+1. Use namespaces to organize resources
+2. Implement resource requests and limits
+3. Use liveness and readiness probes
+4. Leverage ConfigMaps and Secrets for configuration
+5. Implement proper logging and monitoring
+6. Use rolling updates for zero-downtime deployments
+7. Regular backup of etcd data
+
+Kubernetes has become the de facto standard for container orchestration, powering modern cloud-native applications at scale.

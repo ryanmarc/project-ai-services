@@ -1,0 +1,65 @@
+# Docker Compose configuration for Wiki Service
+# For local development and testing
+
+version: '3.8'
+
+services:
+  wiki-service:
+    build:
+      context: .
+      dockerfile: Containerfile
+    container_name: wiki-service
+    ports:
+      - "8080:8080"
+    volumes:
+      # Mount wiki data directory for persistence
+      - ./wiki-data:/data/wiki:Z
+      # Optional: Mount source documents
+      - ./test/fixtures:/data/sources:ro
+    environment:
+      # Wiki Configuration
+      - WIKI_DATA_DIR=/data/wiki
+      - WIKI_MAX_PAGES_PER_QUERY=10
+      - WIKI_INDEX_SEARCH_LIMIT=20
+
+      # LLM Configuration
+      - LLM_ENDPOINT=http://vllm-server:8000
+      - LLM_MODEL=ibm-granite/granite-3.3-8b-instruct
+      - LLM_MAX_TOKENS=4096
+      - LLM_TEMPERATURE=0.2
+
+      # API Configuration
+      - API_HOST=0.0.0.0
+      - API_PORT=8080
+
+      # Logging
+      - LOG_LEVEL=info
+    networks:
+      - wiki-network
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "/app/wiki-service", "stats"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 5s
+
+  # Optional: Mock LLM server for testing
+  # Uncomment if you need a local LLM endpoint
+  # vllm-server:
+  #   image: vllm/vllm-openai:latest
+  #   container_name: vllm-server
+  #   ports:
+  #     - "8000:8000"
+  #   environment:
+  #     - MODEL=ibm-granite/granite-3.3-8b-instruct
+  #   networks:
+  #     - wiki-network
+
+networks:
+  wiki-network:
+    driver: bridge
+
+volumes:
+  wiki-data:
+    driver: local
