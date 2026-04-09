@@ -1,8 +1,6 @@
 package api
 
 import (
-	"net/http"
-
 	"github.com/gorilla/mux"
 )
 
@@ -11,6 +9,7 @@ func (s *Server) SetupRoutes() *mux.Router {
 	r := mux.NewRouter()
 
 	// Apply middleware
+	r.Use(RequestIDMiddleware)
 	r.Use(LoggingMiddleware)
 	r.Use(CORSMiddleware)
 	r.Use(RecoveryMiddleware)
@@ -47,29 +46,4 @@ func (s *Server) SetupRoutes() *mux.Router {
 	r.HandleFunc("/", s.HandleRoot).Methods("GET")
 
 	return r
-}
-
-// HandleRoot handles GET /
-func (s *Server) HandleRoot(w http.ResponseWriter, r *http.Request) {
-	type RootResponse struct {
-		Service   string   `json:"service"`
-		Version   string   `json:"version"`
-		Endpoints []string `json:"endpoints"`
-	}
-
-	respondJSON(w, http.StatusOK, RootResponse{
-		Service: "Wiki Service API",
-		Version: "v1",
-		Endpoints: []string{
-			"POST /v1/wiki/ingest",
-			"POST /v1/wiki/query",
-			"GET /v1/wiki/pages",
-			"GET /v1/wiki/pages/{path}",
-			"GET /v1/wiki/index",
-			"GET /v1/wiki/log",
-			"GET /v1/wiki/stats",
-			"GET /v1/wiki/navigation/{query_id}",
-			"GET /health",
-		},
-	})
 }

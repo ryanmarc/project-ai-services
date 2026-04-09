@@ -1,12 +1,15 @@
 package api
 
 import (
-	"log"
+	"context"
+	"fmt"
 	"net/http"
 	"time"
+
+	"github.com/IBM/project-ai-services/wiki-service/internal/logger"
 )
 
-// LoggingMiddleware logs HTTP requests
+// LoggingMiddleware logs HTTP requests with structured logging
 func LoggingMiddleware(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		start := time.Now()
@@ -17,9 +20,9 @@ func LoggingMiddleware(next http.Handler) http.Handler {
 		// Call the next handler
 		next.ServeHTTP(wrapped, r)
 
-		// Log the request
+		// Log the request with structured logging
 		duration := time.Since(start)
-		log.Printf("[%s] %s %s - %d (%v)",
+		logger.Info("HTTP Request: method=%s path=%s remote=%s status=%d duration=%v",
 			r.Method,
 			r.URL.Path,
 			r.RemoteAddr,
@@ -52,11 +55,39 @@ func RecoveryMiddleware(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		defer func() {
 			if err := recover(); err != nil {
-				log.Printf("Panic recovered: %v", err)
+				logger.Error("Panic recovered: method=%s path=%s error=%v", r.Method, r.URL.Path, err)
 				http.Error(w, "Internal Server Error", http.StatusInternalServerError)
 			}
 		}()
 
+		next.ServeHTTP(w, r)
+	})
+}
+
+// TimeoutMiddleware adds request timeout handling
+func TimeoutMiddleware(timeout time.Duration) func(http.Handler) http.Handler {
+	return func(next http.Handler) http.Handler {
+		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			ctx := r.Context()
+			if timeout > 0 {
+				var cancel func()
+				ctx, cancel = context.WithTimeout(ctx, timeout)
+				defer cancel()
+				r = r.WithContext(ctx)
+			}
+			next.ServeHTTP(w, r)
+		})
+	}
+}
+
+// RequestIDMiddleware adds a unique request ID to each request
+func RequestIDMiddleware(next http.Handler) http.Handler {
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		requestID := r.Header.Get("X-Request-ID")
+		if requestID == "" {
+			requestID = fmt.Sprintf("%d", time.Now().UnixNano())
+		}
+		w.Header().Set("X-Request-ID", requestID)
 		next.ServeHTTP(w, r)
 	})
 }

@@ -8,8 +8,10 @@ import (
 	"sync"
 	"time"
 
+	"github.com/IBM/project-ai-services/wiki-service/internal/errors"
 	"github.com/IBM/project-ai-services/wiki-service/internal/ingest"
 	"github.com/IBM/project-ai-services/wiki-service/internal/llm"
+	"github.com/IBM/project-ai-services/wiki-service/internal/logger"
 	"github.com/IBM/project-ai-services/wiki-service/internal/query"
 	"github.com/IBM/project-ai-services/wiki-service/internal/wiki"
 	"github.com/IBM/project-ai-services/wiki-service/pkg/types"
@@ -52,20 +54,24 @@ func NewServer(wikiManager *wiki.Manager, llmClient *llm.Client, wikiConfig type
 
 // ErrorResponse represents an API error response
 type ErrorResponse struct {
-	Error   string `json:"error"`
-	Message string `json:"message"`
-	Code    int    `json:"code"`
+	Error   string                 `json:"error"`
+	Message string                 `json:"message"`
+	Code    int                    `json:"code"`
+	Context map[string]interface{} `json:"context,omitempty"`
 }
 
 // respondJSON sends a JSON response
 func respondJSON(w http.ResponseWriter, status int, data interface{}) {
 	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(status)
-	json.NewEncoder(w).Encode(data)
+	if err := json.NewEncoder(w).Encode(data); err != nil {
+		logger.Error("Failed to encode JSON response: %v", err)
+	}
 }
 
 // respondError sends an error response
 func respondError(w http.ResponseWriter, status int, message string) {
+	logger.Warn("API Error: status=%d message=%s", status, message)
 	respondJSON(w, status, ErrorResponse{
 		Error:   http.StatusText(status),
 		Message: message,
@@ -73,41 +79,66 @@ func respondError(w http.ResponseWriter, status int, message string) {
 	})
 }
 
+// respondAppError sends an AppError response
+func respondAppError(w http.ResponseWriter, err *errors.AppError) {
+	logger.Error("API Error: code=%s message=%s", err.Code, err.Message)
+	respondJSON(w, err.HTTPStatus, ErrorResponse{
+		Error:   string(err.Code),
+		Message: err.Message,
+		Code:    err.HTTPStatus,
+		Context: err.Context,
+	})
+}
+
 // HandleIngest handles POST /v1/wiki/ingest
 func (s *Server) HandleIngest(w http.ResponseWriter, r *http.Request) {
+	logger.Info("Ingest request received")
+
 	var req types.IngestRequest
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
-		respondError(w, http.StatusBadRequest, fmt.Sprintf("Invalid request body: %v", err))
+		appErr := errors.NewInvalidRequest(fmt.Sprintf("Invalid request body: %v", err))
+		respondAppError(w, appErr)
 		return
 	}
 
 	// Validate request
 	if req.SourcePath == "" {
-		respondError(w, http.StatusBadRequest, "source_path is required")
+		appErr := errors.NewInvalidRequest("source_path is required")
+		respondAppError(w, appErr)
 		return
 	}
+
+	logger.Info("Ingesting document: path=%s type=%s", req.SourcePath, req.SourceType)
 
 	// Perform ingestion
 	resp, err := s.IngestEngine.Ingest(req)
 	if err != nil {
-		respondError(w, http.StatusInternalServerError, fmt.Sprintf("Ingestion failed: %v", err))
+		appErr := errors.NewIngestError(err, "Ingestion failed")
+		appErr.WithContext("source_path", req.SourcePath)
+		respondAppError(w, appErr)
 		return
 	}
 
+	logger.Info("Ingest completed: pages_created=%d entities=%d concepts=%d",
+		len(resp.PagesCreated), len(resp.EntitiesFound), len(resp.ConceptsFound))
 	respondJSON(w, http.StatusOK, resp)
 }
 
 // HandleQuery handles POST /v1/wiki/query
 func (s *Server) HandleQuery(w http.ResponseWriter, r *http.Request) {
+	logger.Info("Query request received")
+
 	var req types.QueryRequest
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
-		respondError(w, http.StatusBadRequest, fmt.Sprintf("Invalid request body: %v", err))
+		appErr := errors.NewInvalidRequest(fmt.Sprintf("Invalid request body: %v", err))
+		respondAppError(w, appErr)
 		return
 	}
 
 	// Validate request
 	if req.Query == "" {
-		respondError(w, http.StatusBadRequest, "query is required")
+		appErr := errors.NewInvalidRequest("query is required")
+		respondAppError(w, appErr)
 		return
 	}
 
@@ -119,10 +150,14 @@ func (s *Server) HandleQuery(w http.ResponseWriter, r *http.Request) {
 		req.OutputFormat = "markdown"
 	}
 
+	logger.Info("Executing query: query=%s max_pages=%d", req.Query, req.MaxPages)
+
 	// Perform query
 	resp, err := s.QueryEngine.Query(req)
 	if err != nil {
-		respondError(w, http.StatusInternalServerError, fmt.Sprintf("Query failed: %v", err))
+		appErr := errors.NewQueryError(err, "Query execution failed")
+		appErr.WithContext("query", req.Query)
+		respondAppError(w, appErr)
 		return
 	}
 
@@ -137,6 +172,9 @@ func (s *Server) HandleQuery(w http.ResponseWriter, r *http.Request) {
 		Timestamp:      time.Now(),
 	}
 	s.navMutex.Unlock()
+
+	logger.Info("Query completed: query_id=%s pages_read=%d citations=%d",
+		queryID, len(resp.PagesRead), len(resp.Citations))
 
 	// Add query ID to response
 	type QueryResponseWithID struct {
@@ -323,14 +361,21 @@ func (s *Server) HandleGetNavigation(w http.ResponseWriter, r *http.Request) {
 func (s *Server) HandleHealth(w http.ResponseWriter, r *http.Request) {
 	// Check LLM health
 	llmHealthy := true
+	llmError := ""
 	if err := s.LLMClient.Health(); err != nil {
 		llmHealthy = false
+		llmError = err.Error()
+		logger.Warn("LLM health check failed: %v", err)
 	}
 
 	// Check wiki manager
 	wikiHealthy := true
-	if _, err := s.WikiManager.GetStats(); err != nil {
+	wikiError := ""
+	stats, err := s.WikiManager.GetStats()
+	if err != nil {
 		wikiHealthy = false
+		wikiError = err.Error()
+		logger.Warn("Wiki health check failed: %v", err)
 	}
 
 	status := "healthy"
@@ -340,17 +385,74 @@ func (s *Server) HandleHealth(w http.ResponseWriter, r *http.Request) {
 		httpStatus = http.StatusServiceUnavailable
 	}
 
-	type HealthResponse struct {
-		Status      string    `json:"status"`
-		LLMHealthy  bool      `json:"llm_healthy"`
-		WikiHealthy bool      `json:"wiki_healthy"`
-		Timestamp   time.Time `json:"timestamp"`
+	type HealthCheck struct {
+		Healthy bool   `json:"healthy"`
+		Error   string `json:"error,omitempty"`
 	}
 
-	respondJSON(w, httpStatus, HealthResponse{
-		Status:      status,
-		LLMHealthy:  llmHealthy,
-		WikiHealthy: wikiHealthy,
-		Timestamp:   time.Now(),
-	})
+	type HealthResponse struct {
+		Status      string       `json:"status"`
+		LLM         HealthCheck  `json:"llm"`
+		Wiki        HealthCheck  `json:"wiki"`
+		Timestamp   time.Time    `json:"timestamp"`
+		Version     string       `json:"version"`
+		Uptime      string       `json:"uptime,omitempty"`
+		TotalPages  int          `json:"total_pages,omitempty"`
+	}
+
+	response := HealthResponse{
+		Status: status,
+		LLM: HealthCheck{
+			Healthy: llmHealthy,
+			Error:   llmError,
+		},
+		Wiki: HealthCheck{
+			Healthy: wikiHealthy,
+			Error:   wikiError,
+		},
+		Timestamp: time.Now(),
+		Version:   "v0.1.0",
+	}
+
+	if wikiHealthy && stats != nil {
+		response.TotalPages = stats.TotalPages
+	}
+
+	respondJSON(w, httpStatus, response)
+}
+
+// HandleRoot handles GET /
+func (s *Server) HandleRoot(w http.ResponseWriter, r *http.Request) {
+	type EndpointInfo struct {
+		Method      string `json:"method"`
+		Path        string `json:"path"`
+		Description string `json:"description"`
+	}
+
+	type RootResponse struct {
+		Service     string         `json:"service"`
+		Version     string         `json:"version"`
+		Description string         `json:"description"`
+		Endpoints   []EndpointInfo `json:"endpoints"`
+	}
+
+	response := RootResponse{
+		Service:     "Wiki Service",
+		Version:     "v0.1.0",
+		Description: "LLM-powered knowledge base with persistent wiki maintenance",
+		Endpoints: []EndpointInfo{
+			{Method: "GET", Path: "/", Description: "Service information"},
+			{Method: "GET", Path: "/health", Description: "Health check"},
+			{Method: "POST", Path: "/v1/wiki/ingest", Description: "Ingest a document"},
+			{Method: "POST", Path: "/v1/wiki/query", Description: "Query the wiki"},
+			{Method: "GET", Path: "/v1/wiki/pages", Description: "List all pages"},
+			{Method: "GET", Path: "/v1/wiki/pages/{path}", Description: "Get a specific page"},
+			{Method: "GET", Path: "/v1/wiki/index", Description: "Get wiki index"},
+			{Method: "GET", Path: "/v1/wiki/log", Description: "Get activity log"},
+			{Method: "GET", Path: "/v1/wiki/stats", Description: "Get wiki statistics"},
+			{Method: "GET", Path: "/v1/wiki/navigation/{query_id}", Description: "Get query navigation path"},
+		},
+	}
+
+	respondJSON(w, http.StatusOK, response)
 }

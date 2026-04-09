@@ -1,39 +1,57 @@
 # Multi-stage build for wiki-service
+# Optimized for production deployment
 
 # Stage 1: Build
 FROM registry.access.redhat.com/ubi9/go-toolset:1.25 AS builder
 
-WORKDIR /workspace
+# Use the default user's home directory for build
+# The go-toolset image runs as user 1001 with home at /opt/app-root/src
+WORKDIR /opt/app-root/src
 
-# Copy go mod files
+# Copy go mod files first for better layer caching
 COPY go.mod go.sum ./
 
-# Download dependencies
-RUN go mod download
+# Download dependencies (cached if go.mod/go.sum unchanged)
+RUN go mod download && go mod verify
 
 # Copy source code
 COPY . .
 
-# Build the binary (let Go use native architecture)
-RUN CGO_ENABLED=0 go build -o wiki-service ./cmd/wiki-service
+# Build the binary with optimizations
+# - CGO_ENABLED=0: Static binary for portability
+# - -ldflags: Strip debug info and set version
+# - -trimpath: Remove file system paths from binary
+RUN CGO_ENABLED=0 go build \
+    -ldflags="-w -s -X main.Version=v0.1.0 -X main.BuildTime=$(date -u +%Y-%m-%dT%H:%M:%SZ)" \
+    -trimpath \
+    -o wiki-service \
+    ./cmd/wiki-service
 
 # Stage 2: Runtime
 FROM registry.access.redhat.com/ubi9/ubi-minimal:latest
 
+# Add labels for container metadata
+LABEL name="wiki-service" \
+      version="v0.1.0" \
+      description="LLM-powered knowledge base with persistent wiki maintenance" \
+      maintainer="AI Services Team"
+
 WORKDIR /app
 
 # Copy binary from builder
-COPY --from=builder /workspace/wiki-service /app/wiki-service
+COPY --from=builder /opt/app-root/src/wiki-service /app/wiki-service
 
-# Create wiki data directory
+# Create wiki data directory with proper permissions
 RUN mkdir -p /data/wiki && \
     chown -R 1001:0 /data/wiki && \
-    chmod -R g+rwX /data/wiki
+    chmod -R g+rwX /data/wiki && \
+    # Create a non-root user
+    echo "wiki-service:x:1001:0:Wiki Service User:/app:/sbin/nologin" >> /etc/passwd
 
 # Use non-root user
 USER 1001
 
-# Expose API port (for future use)
+# Expose API port
 EXPOSE 8080
 
 # Set default environment variables
@@ -42,7 +60,13 @@ ENV WIKI_DATA_DIR=/data/wiki \
     LLM_MODEL=ibm-granite/granite-3.3-8b-instruct \
     LLM_MAX_TOKENS=4096 \
     LLM_TEMPERATURE=0.2 \
+    API_HOST=0.0.0.0 \
+    API_PORT=8080 \
     LOG_LEVEL=info
 
-# Run the service
-CMD ["/app/wiki-service"]
+# Health check
+HEALTHCHECK --interval=30s --timeout=10s --start-period=5s --retries=3 \
+    CMD ["/app/wiki-service", "stats"] || exit 1
+
+# Run the service in server mode
+CMD ["/app/wiki-service", "serve"]

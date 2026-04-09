@@ -8,31 +8,45 @@ import (
 	"strings"
 
 	"github.com/IBM/project-ai-services/wiki-service/internal/api"
+	"github.com/IBM/project-ai-services/wiki-service/internal/config"
 	"github.com/IBM/project-ai-services/wiki-service/internal/ingest"
 	"github.com/IBM/project-ai-services/wiki-service/internal/llm"
+	"github.com/IBM/project-ai-services/wiki-service/internal/logger"
 	"github.com/IBM/project-ai-services/wiki-service/internal/query"
 	"github.com/IBM/project-ai-services/wiki-service/internal/wiki"
 	"github.com/IBM/project-ai-services/wiki-service/pkg/types"
 )
 
 func main() {
-	// Load configuration from environment variables
-	config := loadConfig()
-
-	// Initialize wiki manager
-	wikiManager, err := wiki.NewManager(config.Wiki.DataDir)
+	// Load configuration
+	cfg, err := config.Load()
 	if err != nil {
-		log.Fatalf("Failed to initialize wiki manager: %v", err)
+		fmt.Fprintf(os.Stderr, "Configuration error: %v\n", err)
+		os.Exit(1)
 	}
 
+	// Initialize logger
+	log := logger.New(cfg.Wiki.LogLevel, os.Stdout)
+	logger.SetDefault(log)
+
+	logger.Info("Starting Wiki Service")
+	logger.Info("Configuration loaded: data_dir=%s llm_endpoint=%s", cfg.Wiki.DataDir, cfg.LLM.Endpoint)
+
+	// Initialize wiki manager
+	wikiManager, err := wiki.NewManager(cfg.Wiki.DataDir)
+	if err != nil {
+		logger.Fatal("Failed to initialize wiki manager: %v", err)
+	}
+	logger.Info("Wiki manager initialized")
+
 	// Initialize LLM client
-	llmClient := llm.NewClient(config.LLM)
+	llmClient := llm.NewClient(cfg.LLM)
 
 	// Test LLM health
 	if err := llmClient.Health(); err != nil {
-		log.Printf("Warning: LLM health check failed: %v", err)
+		logger.Warn("LLM health check failed: %v", err)
 	} else {
-		log.Println("LLM client initialized successfully")
+		logger.Info("LLM client initialized successfully")
 	}
 
 	// Parse command line arguments
@@ -40,13 +54,13 @@ func main() {
 		command := os.Args[1]
 		switch command {
 		case "serve":
-			handleServe(wikiManager, llmClient, config)
+			handleServe(wikiManager, llmClient, cfg)
 			return
 		case "ingest":
 			handleIngest(wikiManager, llmClient, os.Args[2:])
 			return
 		case "query":
-			handleQuery(wikiManager, llmClient, config.Wiki, os.Args[2:])
+			handleQuery(wikiManager, llmClient, cfg.Wiki, os.Args[2:])
 			return
 		case "stats":
 			handleStats(wikiManager)
@@ -64,30 +78,26 @@ func main() {
 	// Default: print stats
 	handleStats(wikiManager)
 	fmt.Println("\nWiki service initialized successfully!")
-	fmt.Printf("Data directory: %s\n", config.Wiki.DataDir)
-	fmt.Printf("LLM endpoint: %s\n", config.LLM.Endpoint)
-	fmt.Printf("LLM model: %s\n", config.LLM.Model)
+	fmt.Printf("Data directory: %s\n", cfg.Wiki.DataDir)
+	fmt.Printf("LLM endpoint: %s\n", cfg.LLM.Endpoint)
+	fmt.Printf("LLM model: %s\n", cfg.LLM.Model)
 	fmt.Println("\nRun 'wiki-service help' for usage information")
 }
 
 // handleServe starts the API server
-func handleServe(wikiManager *wiki.Manager, llmClient *llm.Client, config Config) {
-	// Get API configuration
-	apiHost := getEnv("API_HOST", "0.0.0.0")
-	apiPort := getEnvInt("API_PORT", 8080)
-
+func handleServe(wikiManager *wiki.Manager, llmClient *llm.Client, cfg *config.Config) {
 	// Create API server
-	server := api.NewServer(wikiManager, llmClient, config.Wiki)
+	server := api.NewServer(wikiManager, llmClient, cfg.Wiki)
 	router := server.SetupRoutes()
 
 	// Start server
-	addr := fmt.Sprintf("%s:%d", apiHost, apiPort)
-	log.Printf("Starting Wiki Service API server on %s", addr)
-	log.Printf("API endpoints available at http://%s/v1/wiki", addr)
-	log.Printf("Health check at http://%s/health", addr)
+	addr := fmt.Sprintf("%s:%d", cfg.API.Host, cfg.API.Port)
+	logger.Info("Starting Wiki Service API server on %s", addr)
+	logger.Info("API endpoints available at http://%s/v1/wiki", addr)
+	logger.Info("Health check at http://%s/health", addr)
 
 	if err := http.ListenAndServe(addr, router); err != nil {
-		log.Fatalf("Server failed to start: %v", err)
+		logger.Fatal("Server failed to start: %v", err)
 	}
 }
 
@@ -103,9 +113,10 @@ func handleIngest(wikiManager *wiki.Manager, llmClient *llm.Client, args []strin
 
 	// Check if file exists
 	if _, err := os.Stat(filePath); os.IsNotExist(err) {
-		log.Fatalf("File not found: %s", filePath)
+		logger.Fatal("File not found: %s", filePath)
 	}
 
+	logger.Info("Ingesting document: %s", filePath)
 	fmt.Printf("Ingesting document: %s\n", filePath)
 
 	// Initialize ingest engine
@@ -121,7 +132,7 @@ func handleIngest(wikiManager *wiki.Manager, llmClient *llm.Client, args []strin
 	// Perform ingestion
 	response, err := ingestEngine.Ingest(request)
 	if err != nil {
-		log.Fatalf("Ingestion failed: %v", err)
+		logger.Fatal("Ingestion failed: %v", err)
 	}
 
 	// Print results
@@ -252,7 +263,7 @@ func handleQuery(wikiManager *wiki.Manager, llmClient *llm.Client, wikiConfig ty
 func handleStats(wikiManager *wiki.Manager) {
 	stats, err := wikiManager.GetStats()
 	if err != nil {
-		log.Printf("Warning: Failed to get wiki stats: %v", err)
+		logger.Warn("Failed to get wiki stats: %v", err)
 		return
 	}
 
@@ -291,58 +302,4 @@ func printHelp() {
 	fmt.Println("  LLM_MODEL                LLM model name (default: ibm-granite/granite-3.3-8b-instruct)")
 	fmt.Println("  LLM_MAX_TOKENS           Max tokens for LLM (default: 4096)")
 	fmt.Println("  LLM_TEMPERATURE          LLM temperature (default: 0.2)")
-}
-
-// Config holds all configuration
-type Config struct {
-	Wiki types.WikiConfig
-	LLM  types.LLMConfig
-}
-
-// loadConfig loads configuration from environment variables
-func loadConfig() Config {
-	return Config{
-		Wiki: types.WikiConfig{
-			DataDir:          getEnv("WIKI_DATA_DIR", "./wiki-data"),
-			MaxPagesPerQuery: getEnvInt("WIKI_MAX_PAGES_PER_QUERY", 10),
-			IndexSearchLimit: getEnvInt("WIKI_INDEX_SEARCH_LIMIT", 20),
-			LogLevel:         getEnv("LOG_LEVEL", "info"),
-		},
-		LLM: types.LLMConfig{
-			Endpoint:    getEnv("LLM_ENDPOINT", "http://localhost:8000"),
-			Model:       getEnv("LLM_MODEL", "ibm-granite/granite-3.3-8b-instruct"),
-			MaxTokens:   getEnvInt("LLM_MAX_TOKENS", 4096),
-			Temperature: getEnvFloat("LLM_TEMPERATURE", 0.2),
-		},
-	}
-}
-
-// getEnv gets an environment variable or returns a default value
-func getEnv(key, defaultValue string) string {
-	if value := os.Getenv(key); value != "" {
-		return value
-	}
-	return defaultValue
-}
-
-// getEnvInt gets an integer environment variable or returns a default value
-func getEnvInt(key string, defaultValue int) int {
-	if value := os.Getenv(key); value != "" {
-		var intValue int
-		if _, err := fmt.Sscanf(value, "%d", &intValue); err == nil {
-			return intValue
-		}
-	}
-	return defaultValue
-}
-
-// getEnvFloat gets a float environment variable or returns a default value
-func getEnvFloat(key string, defaultValue float64) float64 {
-	if value := os.Getenv(key); value != "" {
-		var floatValue float64
-		if _, err := fmt.Sscanf(value, "%f", &floatValue); err == nil {
-			return floatValue
-		}
-	}
-	return defaultValue
 }
