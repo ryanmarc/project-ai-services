@@ -4,9 +4,11 @@ import (
 	"fmt"
 	"log"
 	"os"
+	"strings"
 
 	"github.com/IBM/project-ai-services/wiki-service/internal/ingest"
 	"github.com/IBM/project-ai-services/wiki-service/internal/llm"
+	"github.com/IBM/project-ai-services/wiki-service/internal/query"
 	"github.com/IBM/project-ai-services/wiki-service/internal/wiki"
 	"github.com/IBM/project-ai-services/wiki-service/pkg/types"
 )
@@ -37,6 +39,9 @@ func main() {
 		switch command {
 		case "ingest":
 			handleIngest(wikiManager, llmClient, os.Args[2:])
+			return
+		case "query":
+			handleQuery(wikiManager, llmClient, config.Wiki, os.Args[2:])
 			return
 		case "stats":
 			handleStats(wikiManager)
@@ -118,6 +123,105 @@ func handleIngest(wikiManager *wiki.Manager, llmClient *llm.Client, args []strin
 	fmt.Printf("\nLog entry: %s\n", response.LogEntry)
 }
 
+// handleQuery processes a wiki query
+func handleQuery(wikiManager *wiki.Manager, llmClient *llm.Client, wikiConfig types.WikiConfig, args []string) {
+	if len(args) == 0 {
+		fmt.Println("Error: No query specified")
+		fmt.Println("Usage: wiki-service query <question> [--save]")
+		os.Exit(1)
+	}
+
+	// Parse arguments
+	saveAsPage := false
+	queryText := ""
+
+	for i, arg := range args {
+		if arg == "--save" {
+			saveAsPage = true
+		} else if i == 0 {
+			queryText = arg
+		} else if !saveAsPage {
+			queryText += " " + arg
+		}
+	}
+
+	if queryText == "" {
+		fmt.Println("Error: No query specified")
+		os.Exit(1)
+	}
+
+	fmt.Printf("Query: %s\n", queryText)
+	if saveAsPage {
+		fmt.Println("(Will save result as wiki page)")
+	}
+	fmt.Println()
+
+	// Initialize query engine
+	queryEngine := query.NewEngine(wikiManager, llmClient, wikiConfig.MaxPagesPerQuery)
+
+	// Create query request
+	request := types.QueryRequest{
+		Query:        queryText,
+		MaxPages:     wikiConfig.MaxPagesPerQuery,
+		SaveAsPage:   saveAsPage,
+		OutputFormat: "markdown",
+	}
+
+	// Perform query
+	fmt.Println("Searching wiki and analyzing pages...")
+	response, err := queryEngine.Query(request)
+	if err != nil {
+		log.Fatalf("Query failed: %v", err)
+	}
+
+	// Print results
+	fmt.Println("\n" + strings.Repeat("=", 70))
+	fmt.Println("ANSWER")
+	fmt.Println(strings.Repeat("=", 70))
+	fmt.Printf("\n%s\n", response.Answer)
+
+	// Print navigation path
+	if len(response.NavigationPath) > 0 {
+		fmt.Println("\n" + strings.Repeat("-", 70))
+		fmt.Println("NAVIGATION PATH")
+		fmt.Println(strings.Repeat("-", 70))
+		fmt.Printf("Pages read (%d):\n", len(response.NavigationPath))
+		for i, page := range response.NavigationPath {
+			fmt.Printf("  %d. %s\n", i+1, page)
+		}
+	}
+
+	// Print citations
+	if len(response.Citations) > 0 {
+		fmt.Println("\n" + strings.Repeat("-", 70))
+		fmt.Println("CITATIONS")
+		fmt.Println(strings.Repeat("-", 70))
+		for i, citation := range response.Citations {
+			fmt.Printf("%d. [%s](%s) (relevance: %.2f)\n",
+				i+1, citation.PageTitle, citation.PagePath, citation.Relevance)
+			fmt.Printf("   \"%s\"\n", citation.Excerpt)
+		}
+	}
+
+	// Print suggestions
+	if len(response.Suggestions) > 0 {
+		fmt.Println("\n" + strings.Repeat("-", 70))
+		fmt.Println("FOLLOW-UP QUESTIONS")
+		fmt.Println(strings.Repeat("-", 70))
+		for i, suggestion := range response.Suggestions {
+			fmt.Printf("%d. %s\n", i+1, suggestion)
+		}
+	}
+
+	// Print saved page info
+	if response.SavedPagePath != "" {
+		fmt.Println("\n" + strings.Repeat("-", 70))
+		fmt.Printf("✓ Query saved as: %s\n", response.SavedPagePath)
+	}
+
+	fmt.Println(strings.Repeat("=", 70))
+}
+
 // handleStats prints wiki statistics
 func handleStats(wikiManager *wiki.Manager) {
 	stats, err := wikiManager.GetStats()
@@ -141,14 +245,18 @@ func printHelp() {
 	fmt.Println("\nUsage:")
 	fmt.Println("  wiki-service [command] [arguments]")
 	fmt.Println("\nCommands:")
-	fmt.Println("  ingest <file>  Ingest a document into the wiki")
-	fmt.Println("  stats          Show wiki statistics")
-	fmt.Println("  help           Show this help message")
+	fmt.Println("  ingest <file>       Ingest a document into the wiki")
+	fmt.Println("  query <question>    Query the wiki (use --save to save result)")
+	fmt.Println("  stats               Show wiki statistics")
+	fmt.Println("  help                Show this help message")
 	fmt.Println("\nExamples:")
 	fmt.Println("  wiki-service ingest document.txt")
+	fmt.Println("  wiki-service query \"What is machine learning?\"")
+	fmt.Println("  wiki-service query \"How does X compare to Y?\" --save")
 	fmt.Println("  wiki-service stats")
 	fmt.Println("\nEnvironment Variables:")
 	fmt.Println("  WIKI_DATA_DIR           Wiki data directory (default: ./wiki-data)")
+	fmt.Println("  WIKI_MAX_PAGES_PER_QUERY Max pages to read per query (default: 10)")
 	fmt.Println("  LLM_ENDPOINT            LLM API endpoint (default: http://localhost:8000)")
 	fmt.Println("  LLM_MODEL               LLM model name (default: ibm-granite/granite-3.3-8b-instruct)")
 	fmt.Println("  LLM_MAX_TOKENS          Max tokens for LLM (default: 4096)")
