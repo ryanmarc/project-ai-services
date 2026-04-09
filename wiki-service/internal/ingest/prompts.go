@@ -45,11 +45,24 @@ func IngestAnalysisPrompt(documentContent, indexContent string) string {
 
 Your task:
 1. Read and analyze the source document
-2. Extract key entities (people, organizations, concepts, technologies, places)
-3. Identify main themes and topics
+2. Extract key entities (people, organizations, technologies, places, institutions) - these are CONCRETE things
+3. Identify main concepts and themes (abstract ideas, methodologies, principles, theories) - these are ABSTRACT ideas
 4. Generate a comprehensive summary (2-3 paragraphs)
 5. Identify connections to existing wiki pages
 6. Suggest new pages to create or existing pages to update
+
+IMPORTANT DISTINCTION:
+- Entities: Concrete things like "IBM Watson", "Geoffrey Hinton", "Stanford University", "TensorFlow"
+- Concepts: Abstract ideas like "Machine Learning", "Neural Networks", "Supervised Learning", "Deep Learning"
+
+When extracting concepts, include ALL significant concepts mentioned in the document, not just the main topic.
+For example, if a document discusses "Artificial Intelligence", also extract related concepts like:
+- Machine Learning
+- Deep Learning
+- Natural Language Processing
+- Computer Vision
+- Reinforcement Learning
+etc.
 
 Source document:
 %s
@@ -63,7 +76,7 @@ Respond in JSON format with this exact structure:
   "entities": [
     {
       "name": "Entity Name",
-      "type": "person|organization|technology|place|other",
+      "type": "person|organization|technology|place|institution",
       "description": "Brief description of the entity and its role in the document"
     }
   ],
