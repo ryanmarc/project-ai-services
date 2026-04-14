@@ -7,6 +7,7 @@ metadata:
     ai-services.io/template: "{{ .AppTemplateName }}"
     ai-services.io/version: "{{ .Version }}"
   annotations:
+    io.podman.annotations.ulimit: "nofile=134217728:134217728,memlock=-1:-1"
     ai-services.io/model1: BAAI/bge-reranker-v2-m3
     ai-services.io/model2: ibm-granite/granite-embedding-278m-multilingual
     ai-services.io/model3: ibm-granite/granite-3.3-8b-instruct
@@ -16,7 +17,7 @@ spec:
     - name: dshm
       emptyDir:
         medium: Memory
-        sizeLimit: 64Gi
+        sizeLimit: 128Gi
     - name: dshm2
       emptyDir:
         medium: Memory
@@ -37,6 +38,14 @@ spec:
           -tp ${AIU_WORLD_SIZE} \
           --max-model-len ${MAX_MODEL_LEN} \
           --max-num-seqs ${MAX_BATCH_SIZE} \
+          --gpu-memory-utilization 0.95 \
+          --enable-chunked-prefill \
+          --enable-prefix-caching \
+          --max-num-batched-tokens 131072 \
+          --scheduler-delay-factor 0.0 \
+          --pids-limit=0 \
+          --memory=200G \
+          --shm-size=2G \
           --served-model-name ibm-granite/granite-3.3-8b-instruct --port 8000
       livenessProbe:
         httpGet:
@@ -57,6 +66,10 @@ spec:
           value: "32768"
         - name: MAX_BATCH_SIZE
           value: "32"
+        - name: VLLM_GPU_MEMORY_UTILIZATION
+          value: "0.95"
+        - name: NCCL_IB_DISABLE
+          value: "0"
         - name: MASTER_PORT
           value: "12355"
         {{- /* Check if .env.instruct exists and is a non-empty map */}}
@@ -70,9 +83,9 @@ spec:
       resources:
         requests:
           podman.io/device=/dev/vfio: 4
-          memory: "150Gi"
+          memory: "214Gi"
         limits:
-          memory: "150Gi"
+          memory: "214Gi"
       ports:
         - containerPort: 8000
       volumeMounts:
