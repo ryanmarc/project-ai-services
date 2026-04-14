@@ -35,18 +35,20 @@ spec:
         - |
           /opt/app-root/spyre_entrypoint.sh \
           --model ${VLLM_MODEL_PATH} \
-          -tp ${AIU_WORLD_SIZE} \
+          --tensor-parallel-size ${AIU_WORLD_SIZE} \
           --max-model-len ${MAX_MODEL_LEN} \
           --max-num-seqs ${MAX_BATCH_SIZE} \
+          --max-num-batched-tokens 131072 \
           --gpu-memory-utilization 0.95 \
           --enable-chunked-prefill \
           --enable-prefix-caching \
-          --max-num-batched-tokens 131072 \
-          --scheduler-delay-factor 0.0 \
-          --pids-limit=0 \
-          --memory=200G \
-          --shm-size=2G \
-          --served-model-name ibm-granite/granite-3.3-8b-instruct --port 8000
+          --swap-space 8 \
+          --block-size 16 \
+          --dtype bfloat16 \
+          --kv-cache-dtype auto \
+          --disable-log-stats \
+          --served-model-name ibm-granite/granite-3.3-8b-instruct \
+          --port 8000
       livenessProbe:
         httpGet:
           path: /health
