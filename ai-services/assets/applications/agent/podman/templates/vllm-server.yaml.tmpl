@@ -35,7 +35,7 @@ spec:
         - |
           /opt/app-root/spyre_entrypoint.sh \
           --model ${VLLM_MODEL_PATH} \
-          --data_parallel_size ${AIU_WORLD_SIZE} \
+          --tensor_parallel_size ${AIU_WORLD_SIZE} \
           --max-model-len ${MAX_MODEL_LEN} \
           --max-num-seqs ${MAX_BATCH_SIZE} \
           --max_num_batched_tokens 16384 \
