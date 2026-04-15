@@ -38,14 +38,16 @@ spec:
           --tensor-parallel-size ${AIU_WORLD_SIZE} \
           --max-model-len ${MAX_MODEL_LEN} \
           --max-num-seqs ${MAX_BATCH_SIZE} \
-          --max-num-batched-tokens 131072 \
           --gpu-memory-utilization 0.95 \
           --enable-chunked-prefill \
           --enable-prefix-caching \
           --swap-space 8 \
           --block-size 16 \
           --dtype bfloat16 \
-          --kv-cache-dtype auto \
+          --max-num-partial-prefills 2 \
+          --scheduling-policy priority \
+          --num-lookahead-slots 2 \
+          --disable-sliding-window \
           --served-model-name ibm-granite/granite-3.3-8b-instruct \
           --port 8000
       livenessProbe:
