@@ -26,6 +26,10 @@ spec:
       hostPath:
         path: "/var/lib/ai-services/models"
         type: Directory
+    - name: sendnn-cache
+      hostPath:
+        path: "/var/lib/ai-services/cache/sendnn"
+        type: DirectoryOrCreate
   containers:
     - name: instruct
       image: "{{ .Values.instruct.image }}"
@@ -72,7 +76,7 @@ spec:
         - name: TORCH_SENDNN_CACHE_ENABLE
           value: "1"
         - name: TORCH_SENDNN_CACHE_DIR
-          value: "/tmp/sendnn_cache"
+          value: "/cache/sendnn"
         # Reduce log noise
         - name: DTLOG_LEVEL
           value: "ERROR"
@@ -107,6 +111,8 @@ spec:
           readOnly: true
         - mountPath: /dev/shm
           name: dshm
+        - mountPath: /cache/sendnn:z
+          name: sendnn-cache
     - name: embedding
       image: "{{ .Values.embedding.image }}"
       command: ["/bin/sh", "-c"]
