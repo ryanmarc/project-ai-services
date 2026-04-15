@@ -35,19 +35,20 @@ spec:
         - |
           /opt/app-root/spyre_entrypoint.sh \
           --model ${VLLM_MODEL_PATH} \
-          --tensor-parallel-size ${AIU_WORLD_SIZE} \
+          --data_parallel_size ${AIU_WORLD_SIZE} \
           --max-model-len ${MAX_MODEL_LEN} \
           --max-num-seqs ${MAX_BATCH_SIZE} \
+          --max_num_batched_tokens 16384 \
           --gpu-memory-utilization 0.95 \
           --enable-chunked-prefill \
           --enable-prefix-caching \
           --swap-space 8 \
           --block-size 16 \
           --dtype bfloat16 \
-          --max-num-partial-prefills 2 \
           --scheduling-policy priority \
           --num-lookahead-slots 2 \
           --disable-sliding-window \
+          --numa-bind \
           --served-model-name ibm-granite/granite-3.3-8b-instruct \
           --port 8000
       livenessProbe:
