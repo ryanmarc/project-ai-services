@@ -61,14 +61,9 @@ spec:
           value: "32768"
         - name: MAX_BATCH_SIZE
           value: "8"
-        # Spyre backend
-        - name: VLLM_SPYRE_DYNAMO_BACKEND
-          value: "sendnn"
         - name: VLLM_SPYRE_USE_CB
           value: "1"
         - name: VLLM_SPYRE_USE_CHUNKED_PREFILL
-          value: "1"
-        - name: VLLM_SPYRE_COMPILE
           value: "1"
         # Reduce log noise
         - name: DTLOG_LEVEL
