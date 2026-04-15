@@ -17,7 +17,7 @@ spec:
     - name: dshm
       emptyDir:
         medium: Memory
-        sizeLimit: 128Gi
+        sizeLimit: 64Gi
     - name: dshm2
       emptyDir:
         medium: Memory
@@ -28,75 +28,85 @@ spec:
         type: Directory
   containers:
     - name: instruct
-      image: "{{ .Values.instruct.image }}"
-      command: ["/bin/bash"]
-      args:
-        - "-c"
-        - |
-          /opt/app-root/spyre_entrypoint.sh \
-          --model ${VLLM_MODEL_PATH} \
-          --tensor_parallel_size ${AIU_WORLD_SIZE} \
-          --max-model-len ${MAX_MODEL_LEN} \
-          --max-num-seqs ${MAX_BATCH_SIZE} \
-          --max_num_batched_tokens 16384 \
-          --gpu-memory-utilization 0.95 \
-          --enable-chunked-prefill \
-          --enable-prefix-caching \
-          --swap-space 8 \
-          --block-size 16 \
-          --dtype bfloat16 \
-          --scheduling-policy priority \
-          --num-lookahead-slots 2 \
-          --disable-sliding-window \
-          --served-model-name ibm-granite/granite-3.3-8b-instruct \
-          --port 8000
-      livenessProbe:
-        httpGet:
-          path: /health
-          port: 8000
-        initialDelaySeconds: 420
-        periodSeconds: 30
-        timeoutSeconds: 5
-        failureThreshold: 3
-      env:
-        - name: VLLM_MODEL_PATH
-          value: "/models/ibm-granite/granite-3.3-8b-instruct"
-        - name: AIU_WORLD_SIZE
-          value: "4"
-        - name: VLLM_SPYRE_USE_CB
-          value: "1"
-        - name: MAX_MODEL_LEN
-          value: "32768"
-        - name: MAX_BATCH_SIZE
-          value: "32"
-        - name: VLLM_GPU_MEMORY_UTILIZATION
-          value: "0.95"
-        - name: NCCL_IB_DISABLE
-          value: "0"
-        - name: MASTER_PORT
-          value: "12355"
-        {{- /* Check if .env.instruct exists and is a non-empty map */}}
-        {{- with .env.instruct }}
-          {{- /* If it does, '.' (dot) is now scoped to .env.instruct */}}
-          {{- range $k, $v := . }}
-        - name: {{ $k }}
-          value: "{{ $v }}"
-          {{- end }}
+    image: "{{ .Values.instruct.image }}"
+    command: ["/bin/bash"]
+    args:
+      - "-c"
+      - |
+        /opt/app-root/spyre_entrypoint.sh \
+        --model ${VLLM_MODEL_PATH} \
+        --tensor-parallel-size 4 \
+        --distributed-executor-backend mp \
+        --dtype float16 \
+        --max-model-len ${MAX_MODEL_LEN} \
+        --max-num-seqs ${MAX_BATCH_SIZE} \
+        --max-num-batched-tokens 16384 \
+        --block-size 64 \
+        --tool-call-parser granite \
+        --disable-frontend-multiprocessing \
+        --served-model-name ibm-granite/granite-3.3-8b-instruct \
+        --port 8000
+    livenessProbe:
+      httpGet:
+        path: /health
+        port: 8000
+      initialDelaySeconds: 420
+      periodSeconds: 30
+      timeoutSeconds: 5
+      failureThreshold: 3
+    env:
+      - name: VLLM_MODEL_PATH
+        value: "/models/ibm-granite/granite-3.3-8b-instruct"
+      - name: MAX_MODEL_LEN
+        value: "32768"
+      - name: MAX_BATCH_SIZE
+        value: "8"
+      # Spyre backend
+      - name: VLLM_SPYRE_DYNAMO_BACKEND
+        value: "sendnn"
+      - name: VLLM_SPYRE_USE_CB
+        value: "1"
+      - name: VLLM_SPYRE_USE_CHUNKED_PREFILL
+        value: "1"
+      # Compiled graph cache — vastly speeds up restarts
+      - name: TORCH_SENDNN_CACHE_ENABLE
+        value: "1"
+      - name: TORCH_SENDNN_CACHE_DIR
+        value: "/tmp/sendnn_cache"
+      # Reduce log noise
+      - name: DTLOG_LEVEL
+        value: "ERROR"
+      - name: TORCH_SENDNN_LOG
+        value: "CRITICAL"
+      - name: VLLM_LOGGING_LEVEL
+        value: "INFO"
+      # Networking
+      - name: NCCL_IB_DISABLE
+        value: "0"
+      - name: MASTER_PORT
+        value: "12355"
+      {{- /* Check if .env.instruct exists and is a non-empty map */}}
+      {{- with .env.instruct }}
+        {{- /* If it does, '.' (dot) is now scoped to .env.instruct */}}
+        {{- range $k, $v := . }}
+      - name: {{ $k }}
+        value: "{{ $v }}"
         {{- end }}
-      resources:
-        requests:
-          podman.io/device=/dev/vfio: 4
-          memory: "214Gi"
-        limits:
-          memory: "214Gi"
-      ports:
-        - containerPort: 8000
-      volumeMounts:
-        - mountPath: /models:z
-          name: models
-          readOnly: true
-        - mountPath: /dev/shm
-          name: dshm
+      {{- end }}
+    resources:
+      requests:
+        podman.io/device=/dev/vfio: 4
+        memory: "150Gi"
+      limits:
+        memory: "150Gi"
+    ports:
+      - containerPort: 8000
+    volumeMounts:
+      - mountPath: /models:z
+        name: models
+        readOnly: true
+      - mountPath: /dev/shm
+        name: dshm
     - name: embedding
       image: "{{ .Values.embedding.image }}"
       command: ["/bin/sh", "-c"]
