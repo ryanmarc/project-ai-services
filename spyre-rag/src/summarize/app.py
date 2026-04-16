@@ -111,7 +111,7 @@ async def summarize_exception_handler(request: Request, exc: SummarizeException)
 
 def initialize_models():
     global llm_model_dict
-    _, llm_model_dict,_  = get_model_endpoints()
+    _, llm_model_dict, _, _  = get_model_endpoints()
 
 async def locked_stream(stream_g):
     """Wrap a vLLM SSE generator, releasing the concurrency semaphore when the stream ends."""

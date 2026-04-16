@@ -195,7 +195,9 @@ def get_model_endpoints():
         'reranker_model':    os.getenv("RERANKER_MODEL"),
     }
 
-    return emb_model_dict, llm_model_dict, reranker_model_dict
+    vllm_tokenizer_endpoint = os.getenv("VLLM_TOKENIZER_ENDPOINT", os.getenv("EMB_ENDPOINT", ""))
+
+    return emb_model_dict, llm_model_dict, reranker_model_dict, vllm_tokenizer_endpoint
 
 def setup_digitized_doc_dir():
     os.makedirs(DIGITIZED_DOCS_DIR, exist_ok=True)

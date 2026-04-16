@@ -54,6 +54,7 @@ vectorstore_lock = asyncio.Lock()
 emb_model_dict = {}
 llm_model_dict = {}
 reranker_model_dict = {}
+vllm_tokenizer_endpoint = ""
 
 settings = get_settings()
 concurrency_limiter = BoundedSemaphore(settings.max_concurrent_requests)
@@ -62,8 +63,8 @@ concurrency_limiter = BoundedSemaphore(settings.max_concurrent_requests)
 POOL_SIZE = 32
 
 def initialize_models():
-    global emb_model_dict, llm_model_dict, reranker_model_dict
-    emb_model_dict, llm_model_dict, reranker_model_dict = get_model_endpoints()
+    global emb_model_dict, llm_model_dict, reranker_model_dict, vllm_tokenizer_endpoint
+    emb_model_dict, llm_model_dict, reranker_model_dict, vllm_tokenizer_endpoint = get_model_endpoints()
 
 def initialize_vectorstore():
     global vectorstore
@@ -180,7 +181,7 @@ async def get_reference_docs(req: ReferenceRequest) -> ReferenceResponse:
 
         # Validate query length
         is_valid, error_msg = await asyncio.to_thread(
-            validate_query_length, req.prompt, emb_endpoint
+            validate_query_length, req.prompt, vllm_tokenizer_endpoint
         )
         if not is_valid:
             APIError.raise_error(ErrorCode.INVALID_PARAMETER, error_msg)
@@ -322,7 +323,7 @@ async def chat_completion(req: ChatCompletionRequest) -> ChatCompletionResponse 
 
         # Validate query length
         is_valid, error_msg = await asyncio.to_thread(
-            validate_query_length, query, emb_endpoint
+            validate_query_length, query, vllm_tokenizer_endpoint
         )
         if not is_valid:
             # Return streaming error response for consistency
@@ -375,13 +376,13 @@ async def chat_completion(req: ChatCompletionRequest) -> ChatCompletionResponse 
         try:
             if req.stream:
                 vllm_stream = await asyncio.to_thread(
-                    query_vllm_stream, query, docs, llm_endpoint, llm_model, req.stop, max_tokens, req.temperature, perf_stat_dict, lang
+                    query_vllm_stream, query, docs, llm_endpoint, llm_model, req.stop, max_tokens, req.temperature, perf_stat_dict, lang, tokenizer_endpoint=vllm_tokenizer_endpoint
                 )
                 # For streaming, release is handled in locked_stream's finally block
                 return StreamingResponse(locked_stream(vllm_stream, perf_stat_dict), media_type="text/event-stream")
 
             vllm_non_stream = await asyncio.to_thread(
-                query_vllm_non_stream, query, docs, llm_endpoint, llm_model, req.stop, max_tokens, req.temperature, perf_stat_dict, lang
+                query_vllm_non_stream, query, docs, llm_endpoint, llm_model, req.stop, max_tokens, req.temperature, perf_stat_dict, lang, tokenizer_endpoint=vllm_tokenizer_endpoint
             )
             # Store metrics in registry for non-stream
             perf_registry.add_metric(perf_stat_dict)

@@ -38,7 +38,7 @@ def ingest(directory_path: Path, job_id: Optional[str] = None, doc_id_dict: Opti
 
         logger.info(f"Processing {total_pdfs} document(s)")
 
-        emb_model_dict, llm_model_dict, _ = get_model_endpoints()
+        emb_model_dict, llm_model_dict, _, vllm_tokenizer_endpoint = get_model_endpoints()
 
         # Initialize/reset the database before processing any files
         vector_store = db.get_vector_store()
@@ -46,7 +46,7 @@ def ingest(directory_path: Path, job_id: Optional[str] = None, doc_id_dict: Opti
 
         start_time = time.time()
         doc_chunks_dict, converted_pdf_stats = process_documents(
-            input_file_paths, out_path, llm_model_dict['llm_model'], llm_model_dict['llm_endpoint'],  emb_model_dict["emb_endpoint"],
+            input_file_paths, out_path, llm_model_dict['llm_model'], llm_model_dict['llm_endpoint'],  vllm_tokenizer_endpoint,
             max_tokens=emb_model_dict['max_tokens'] - 100, job_id=job_id, doc_id_dict=doc_id_dict)
         # converted_pdf_stats holds { file_name: {page_count: int, table_count: int, timings: {conversion: time_in_secs, process_text: time_in_secs, process_tables: time_in_secs, chunking: time_in_secs}} }
         if converted_pdf_stats is None or doc_chunks_dict is None:
