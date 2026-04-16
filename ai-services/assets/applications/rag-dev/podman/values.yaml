@@ -59,3 +59,13 @@ summarize:
   image: icr.io/ai-services-cicd/rag:v0.0.86
   # @hidden
   log_level: "INFO"
+
+llmGateway:
+  # @hidden
+  image: llm-gateway:dev
+  # @hidden
+  masterKey: "sk-dev-key"
+  # @description IBM watsonx API key for cloud LLM access. Leave empty to use local vLLM only.
+  watsonxApiKey: ""
+  # @description IBM watsonx project ID. Required when watsonxApiKey is set.
+  watsonxProjectId: ""
