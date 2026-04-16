@@ -55,3 +55,13 @@ opensearch:
     username: "admin"
     # @description Password for OpenSearch authentication. Must be at least 15 characters and contain at least one uppercase letter, one lowercase letter, one digit, and one special character. Avoid common words, predictable patterns, or dictionary terms. Use this to override the default admin password.
     password: "AiServices@12345"
+
+llmGateway:
+  # @hidden
+  image: icr.io/ai-services-cicd/llm-gateway:v0.1.0
+  # @hidden
+  masterKey: "sk-default-key"
+  # @description IBM watsonx API key for cloud LLM access. Leave empty to use local vLLM only.
+  watsonxApiKey: ""
+  # @description IBM watsonx project ID. Required when watsonxApiKey is set.
+  watsonxProjectId: ""

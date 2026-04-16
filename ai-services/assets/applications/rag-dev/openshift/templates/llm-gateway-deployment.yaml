@@ -1,0 +1,74 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: "llm-gateway"
+  labels:
+    ai-services.io/application: {{ .Release.Name }}
+    ai-services.io/template: {{ .Chart.Name }}
+    ai-services.io/version: {{ default .Chart.AppVersion | quote }}
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      ai-services.io/application: {{ .Release.Name }}
+      ai-services.io/component: llm-gateway
+  template:
+    metadata:
+      labels:
+        ai-services.io/application: {{ .Release.Name }}
+        ai-services.io/template: {{ .Chart.Name }}
+        ai-services.io/component: llm-gateway
+        ai-services.io/version: {{ default .Chart.AppVersion | quote }}
+    spec:
+      automountServiceAccountToken: false
+      containers:
+        - name: llm-gateway
+          image: "{{ .Values.llmGateway.image }}"
+          env:
+            - name: VLLM_INSTRUCT_URL
+              value: http://instruct-predictor:8000/v1
+            - name: VLLM_EMBEDDING_URL
+              value: http://embedding-predictor:8080/v1
+            - name: VLLM_RERANKER_URL
+              value: http://reranker-predictor:8080/v1
+            - name: LITELLM_MASTER_KEY
+              valueFrom:
+                secretKeyRef:
+                  name: "llm-gateway-credentials"
+                  key: master-key
+            - name: WATSONX_API_KEY
+              valueFrom:
+                secretKeyRef:
+                  name: "llm-gateway-credentials"
+                  key: watsonx-api-key
+            - name: WATSONX_PROJECT_ID
+              valueFrom:
+                secretKeyRef:
+                  name: "llm-gateway-credentials"
+                  key: watsonx-project-id
+          ports:
+            - containerPort: 4000
+              protocol: TCP
+          livenessProbe:
+            httpGet:
+              path: /health
+              port: 4000
+            initialDelaySeconds: 15
+            periodSeconds: 30
+            timeoutSeconds: 5
+            failureThreshold: 3
+          readinessProbe:
+            httpGet:
+              path: /health
+              port: 4000
+            initialDelaySeconds: 15
+            periodSeconds: 30
+            timeoutSeconds: 5
+            failureThreshold: 3
+          resources:
+            requests:
+              cpu: "500m"
+              memory: "512Mi"
+            limits:
+              cpu: "500m"
+              memory: "512Mi"
