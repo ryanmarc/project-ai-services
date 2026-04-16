@@ -64,7 +64,7 @@ llmGateway:
   # @hidden
   image: llm-gateway:dev
   # @hidden
-  masterKey: "sk-dev-key"
+  masterKey: "112233"
   # @description IBM watsonx API key for cloud LLM access. Leave empty to use local vLLM only.
   watsonxApiKey: ""
   # @description IBM watsonx project ID. Required when watsonxApiKey is set.

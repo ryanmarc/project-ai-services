@@ -6,6 +6,8 @@ metadata:
     ai-services.io/application: "{{ .AppName }}"
     ai-services.io/template: "{{ .AppTemplateName }}"
     ai-services.io/version: "{{ .Version }}"
+  annotations:
+    ai-services.io/ports: "4000:4000"
 spec:
   containers:
     - name: llm-gateway
