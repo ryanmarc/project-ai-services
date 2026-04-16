@@ -50,19 +50,21 @@ spec:
         - "httptools"
       env:
         - name: EMB_ENDPOINT
-          value: "http://{{ .AppName  }}--vllm-server:8001"
+          value: "http://{{ .AppName }}--llm-gateway:4000"
         - name: EMB_MODEL
-          value: "ibm-granite/granite-embedding-278m-multilingual"
+          value: "granite-embedding-278m"
         - name: EMB_MAX_TOKENS
           value: "512"
         - name: LLM_ENDPOINT
-          value: "http://{{ .AppName  }}--vllm-server:8000"
+          value: "http://{{ .AppName }}--llm-gateway:4000"
         - name: LLM_MODEL
-          value: "ibm-granite/granite-3.3-8b-instruct"
+          value: "granite-3.3-8b-instruct"
         - name: RERANKER_ENDPOINT
-          value: "http://{{ .AppName  }}--vllm-server:8002"
+          value: "http://{{ .AppName }}--llm-gateway:4000"
         - name: RERANKER_MODEL
-          value: "BAAI/bge-reranker-v2-m3"
+          value: "bge-reranker-v2-m3"
+        - name: VLLM_TOKENIZER_ENDPOINT
+          value: "http://{{ .AppName }}--vllm-server:8001"
         - name: OPENSEARCH_HOST
           value: "{{ .AppName  }}--opensearch"
         - name: OPENSEARCH_PORT
