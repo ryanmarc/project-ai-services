@@ -240,3 +240,51 @@ async def test_chat_stream_flushes_trailing_frame_without_final_blank_line():
     assert b'"content": "bye"' in joined
     assert b'"finish_reason": "eos_token"' in joined
     assert joined.endswith(b"data: [DONE]\n\n")
+
+
+async def test_embeddings_translates_inputs_and_response():
+    captured = {}
+
+    def handler(request):
+        if request.url.host == "iam.cloud.ibm.com":
+            return httpx.Response(200, json={"access_token": "t", "expires_in": 3600})
+        import json as _json
+
+        captured["url"] = str(request.url)
+        captured["body"] = _json.loads(request.content)
+        return httpx.Response(
+            200,
+            json={"results": [{"embedding": [0.1, 0.2]}, {"embedding": [0.3, 0.4]}]},
+        )
+
+    p = _make(httpx.MockTransport(handler))
+    resp = await p.embeddings({"model": "granite-wx", "input": ["a", "b"]})
+
+    assert "ml/v1/text/embeddings" in captured["url"]
+    assert captured["body"]["model_id"] == "ibm/granite-3-8b-instruct"
+    assert captured["body"]["inputs"] == ["a", "b"]
+    assert captured["body"]["project_id"] == "the-project"
+    assert resp["object"] == "list"
+    assert [d["embedding"] for d in resp["data"]] == [[0.1, 0.2], [0.3, 0.4]]
+
+
+async def test_embeddings_wraps_string_input_in_list():
+    captured = {}
+
+    def handler(request):
+        if request.url.host == "iam.cloud.ibm.com":
+            return httpx.Response(200, json={"access_token": "t", "expires_in": 3600})
+        import json as _json
+
+        captured["body"] = _json.loads(request.content)
+        return httpx.Response(200, json={"results": [{"embedding": [0.9]}]})
+
+    p = _make(httpx.MockTransport(handler))
+    await p.embeddings({"model": "granite-wx", "input": "single-string"})
+    assert captured["body"]["inputs"] == ["single-string"]
+
+
+async def test_rerank_returns_501():
+    p = _make(httpx.MockTransport(lambda req: httpx.Response(500)))
+    with pytest.raises(NotImplementedError):
+        await p.rerank({"model": "granite-wx"})

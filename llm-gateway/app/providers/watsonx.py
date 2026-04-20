@@ -189,8 +189,33 @@ class WatsonxProvider:
             }
             yield b"data: " + json.dumps(openai_chunk).encode() + b"\n\n"
 
-    async def embeddings(self, body: dict) -> dict:  # pragma: no cover - Task 7
-        raise NotImplementedError
+    async def embeddings(self, body: dict) -> dict:
+        token = await self._get_bearer()
+        raw_input = body.get("input")
+        inputs = [raw_input] if isinstance(raw_input, str) else list(raw_input or [])
+        wx_body = {
+            "model_id": self._model_id(),
+            "project_id": self._project_id(),
+            "inputs": inputs,
+        }
+        async with self._client() as c:
+            r = await c.post(
+                f"{self._watsonx_url()}/ml/v1/text/embeddings?version=2024-05-31",
+                json=wx_body,
+                headers={"Authorization": f"Bearer {token}"},
+            )
+            r.raise_for_status()
+            payload = r.json()
+        return {
+            "object": "list",
+            "model": body["model"],
+            "data": [
+                {"object": "embedding", "index": i, "embedding": result["embedding"]}
+                for i, result in enumerate(payload.get("results", []))
+            ],
+        }
 
-    async def rerank(self, body: dict) -> dict:  # pragma: no cover - Task 7
-        raise NotImplementedError
+    async def rerank(self, body: dict) -> dict:
+        raise NotImplementedError(
+            "rerank is not implemented for watsonx provider"
+        )
