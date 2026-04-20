@@ -31,7 +31,7 @@ spec:
               value: http://embedding-predictor:8080/v1
             - name: VLLM_RERANKER_URL
               value: http://reranker-predictor:8080/v1
-            - name: LITELLM_MASTER_KEY
+            - name: GATEWAY_MASTER_KEY
               valueFrom:
                 secretKeyRef:
                   name: "llm-gateway-credentials"

@@ -19,7 +19,7 @@ spec:
           value: "http://{{ .AppName }}--vllm-server:8001/v1"
         - name: VLLM_RERANKER_URL
           value: "http://{{ .AppName }}--vllm-server:8002/v1"
-        - name: LITELLM_MASTER_KEY
+        - name: GATEWAY_MASTER_KEY
           value: "{{ .Values.llmGateway.masterKey }}"
         - name: WATSONX_API_KEY
           value: "{{ .Values.llmGateway.watsonxApiKey }}"
