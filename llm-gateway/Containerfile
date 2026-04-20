@@ -4,10 +4,18 @@ USER 0
 
 RUN dnf install -y --nodocs \
         gcc gcc-c++ make \
-        rust cargo \
         openssl-devel libffi-devel \
+        curl \
     && dnf clean all \
     && rm -rf /var/cache/dnf
+
+ENV RUSTUP_HOME=/opt/rust \
+    CARGO_HOME=/opt/rust \
+    PATH=/opt/rust/bin:$PATH
+
+RUN curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs \
+      | sh -s -- -y --profile minimal --default-toolchain stable \
+ && chmod -R a+rX /opt/rust
 
 USER 1001
 
