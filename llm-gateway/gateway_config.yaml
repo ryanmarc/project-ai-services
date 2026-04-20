@@ -1,35 +1,31 @@
 model_list:
-  # LLM (vLLM local)
   - model_name: granite-3.3-8b-instruct
-    litellm_params:
+    params:
       model: openai/ibm-granite/granite-3.3-8b-instruct
       api_base: os.environ/VLLM_INSTRUCT_URL
       api_key: "fake-key"
 
-  # Embedding (vLLM local)
   - model_name: granite-embedding-278m
-    litellm_params:
+    params:
       model: openai/ibm-granite/granite-embedding-278m-multilingual
       api_base: os.environ/VLLM_EMBEDDING_URL
       api_key: "fake-key"
 
-  # Reranker (vLLM local)
   - model_name: bge-reranker-v2-m3
-    litellm_params:
+    params:
       model: openai/BAAI/bge-reranker-v2-m3
       api_base: os.environ/VLLM_RERANKER_URL
       api_key: "fake-key"
 
-  # LLM (watsonx cloud)
   - model_name: granite-3-8b-instruct-wx
-    litellm_params:
+    params:
       model: watsonx/ibm/granite-3-8b-instruct
       api_key: os.environ/WATSONX_API_KEY
       watsonx_project_id: os.environ/WATSONX_PROJECT_ID
+      api_base: os.environ/WATSONX_URL
 
 general_settings:
-  master_key: os.environ/LITELLM_MASTER_KEY
+  master_key: os.environ/GATEWAY_MASTER_KEY
 
-litellm_settings:
-  drop_params: true
+settings:
   request_timeout: 120
