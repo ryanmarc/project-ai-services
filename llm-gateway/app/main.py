@@ -1,11 +1,12 @@
 from __future__ import annotations
 
+import hmac
 import json
 import os
 import typing
 
 import httpx
-from fastapi import FastAPI, HTTPException, Request, Response, status
+from fastapi import FastAPI, HTTPException, Request, status
 from fastapi.responses import JSONResponse, StreamingResponse
 
 from app.config import GatewayConfig, load_config, resolve_env_ref
@@ -43,7 +44,7 @@ def create_app(cfg: GatewayConfig, providers: dict[str, Provider] | None = None)
         if master_key is None:
             return await call_next(request)
         header = request.headers.get("authorization", "")
-        if not header.startswith("Bearer ") or header[7:] != master_key:
+        if not header.startswith("Bearer ") or not hmac.compare_digest(header[7:], master_key):
             return _error(
                 status.HTTP_401_UNAUTHORIZED,
                 "missing or invalid bearer token",
@@ -132,7 +133,8 @@ def create_app(cfg: GatewayConfig, providers: dict[str, Provider] | None = None)
 
     @app.exception_handler(KeyError)
     async def handle_missing_env(_: Request, exc: KeyError) -> JSONResponse:
-        return _error(500, f"configuration error: {exc.args[0]}", "internal")
+        key = exc.args[0] if exc.args else "<unknown>"
+        return _error(500, f"configuration error: {key}", "internal")
 
     @app.exception_handler(NotImplementedError)
     async def handle_not_implemented(_: Request, exc: NotImplementedError) -> JSONResponse:
