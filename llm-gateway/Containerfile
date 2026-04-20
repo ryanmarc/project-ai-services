@@ -5,7 +5,6 @@ USER 0
 RUN dnf install -y --nodocs \
         gcc gcc-c++ make \
         openssl-devel libffi-devel \
-        curl \
     && dnf clean all \
     && rm -rf /var/cache/dnf
 
