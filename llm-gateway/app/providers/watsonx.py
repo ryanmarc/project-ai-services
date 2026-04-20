@@ -148,6 +148,9 @@ class WatsonxProvider:
                         frame, buf = buf.split(b"\n\n", 1)
                         for chunk in self._translate_sse_frame(frame, body["model"], chat_id, created):
                             yield chunk
+                if buf.strip():
+                    for chunk in self._translate_sse_frame(buf, body["model"], chat_id, created):
+                        yield chunk
             yield b"data: [DONE]\n\n"
         finally:
             await client.aclose()

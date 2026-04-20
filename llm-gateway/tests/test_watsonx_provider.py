@@ -175,3 +175,68 @@ async def test_chat_stream_translates_watsonx_sse_to_openai_chunks():
     assert b'"delta": {"content": "lo"}' in joined
     assert b'"finish_reason": "eos_token"' in joined
     assert joined.endswith(b"data: [DONE]\n\n")
+
+
+class _ChunkedByteStream(httpx.AsyncByteStream):
+    """Async byte stream that yields pre-determined chunks one at a time."""
+
+    def __init__(self, chunks: list[bytes]):
+        self._chunks = chunks
+
+    async def __aiter__(self):
+        for c in self._chunks:
+            yield c
+
+    async def aclose(self):
+        return
+
+
+async def test_chat_stream_handles_frame_split_across_reads():
+    # Watsonx sends a single logical SSE frame, but TCP coalesces it into two
+    # byte chunks that split the JSON payload mid-token.
+    chunks = [
+        b'data: {"results":[{"gen',
+        b'erated_text":"hello","stop_reason":"eos_token"}]}\n\n',
+    ]
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        if request.url.host == "iam.cloud.ibm.com":
+            return httpx.Response(200, json={"access_token": "t", "expires_in": 3600})
+        return httpx.Response(
+            200,
+            headers={"content-type": "text/event-stream"},
+            stream=_ChunkedByteStream(chunks),
+        )
+
+    p = _make(httpx.MockTransport(handler))
+    out: list[bytes] = []
+    async for c in p.chat_stream({"model": "granite-wx", "messages": [{"role": "user", "content": "hi"}]}):
+        out.append(c)
+    joined = b"".join(out)
+    assert b'"content": "hello"' in joined
+    assert b'"finish_reason": "eos_token"' in joined
+    assert joined.endswith(b"data: [DONE]\n\n")
+
+
+async def test_chat_stream_flushes_trailing_frame_without_final_blank_line():
+    # Stream ends without a trailing \n\n — the buffer-flush path must still
+    # emit the last frame.
+    body_bytes = b'data: {"results":[{"generated_text":"bye","stop_reason":"eos_token"}]}\n'
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        if request.url.host == "iam.cloud.ibm.com":
+            return httpx.Response(200, json={"access_token": "t", "expires_in": 3600})
+        return httpx.Response(
+            200,
+            headers={"content-type": "text/event-stream"},
+            stream=httpx.ByteStream(body_bytes),
+        )
+
+    p = _make(httpx.MockTransport(handler))
+    out: list[bytes] = []
+    async for c in p.chat_stream({"model": "granite-wx", "messages": [{"role": "user", "content": "hi"}]}):
+        out.append(c)
+    joined = b"".join(out)
+    assert b'"content": "bye"' in joined
+    assert b'"finish_reason": "eos_token"' in joined
+    assert joined.endswith(b"data: [DONE]\n\n")
