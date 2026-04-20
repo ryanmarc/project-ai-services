@@ -1,33 +1,17 @@
 FROM registry.access.redhat.com/ubi9/python-311:latest
 
-USER 0
-
-RUN dnf install -y --nodocs \
-        gcc gcc-c++ make \
-        openssl-devel libffi-devel \
-    && dnf clean all \
-    && rm -rf /var/cache/dnf
-
-ENV RUSTUP_HOME=/opt/rust \
-    CARGO_HOME=/opt/rust \
-    PATH=/opt/rust/bin:$PATH
-
-RUN curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs \
-      | sh -s -- -y --profile minimal --default-toolchain stable \
- && chmod -R a+rwX /opt/rust
-
-USER 1001
-
 ENV PIP_NO_CACHE_DIR=1 \
-    CARGO_NET_GIT_FETCH_WITH_CLI=true
-
-RUN pip install --upgrade pip \
- && pip install 'litellm[proxy]'
-
-COPY litellm_config.yaml /app/config.yaml
+    GATEWAY_CONFIG_PATH=/app/config.yaml
 
 WORKDIR /app
 
+COPY requirements.txt ./
+RUN pip install --upgrade pip \
+ && pip install --require-hashes -r requirements.txt
+
+COPY app/ ./app/
+COPY gateway_config.yaml ./config.yaml
+
 EXPOSE 4000
 
-CMD ["litellm", "--config", "/app/config.yaml", "--port", "4000"]
+CMD ["uvicorn", "app.main:app", "--host", "0.0.0.0", "--port", "4000"]
