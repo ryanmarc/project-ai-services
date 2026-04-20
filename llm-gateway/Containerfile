@@ -1,6 +1,21 @@
 FROM registry.access.redhat.com/ubi9/python-311:latest
 
-RUN pip install --no-cache-dir litellm[proxy]
+USER 0
+
+RUN dnf install -y --nodocs \
+        gcc gcc-c++ make \
+        rust cargo \
+        openssl-devel libffi-devel \
+    && dnf clean all \
+    && rm -rf /var/cache/dnf
+
+USER 1001
+
+ENV PIP_NO_CACHE_DIR=1 \
+    CARGO_NET_GIT_FETCH_WITH_CLI=true
+
+RUN pip install --upgrade pip \
+ && pip install 'litellm[proxy]'
 
 COPY litellm_config.yaml /app/config.yaml
 
