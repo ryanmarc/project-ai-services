@@ -1,0 +1,13 @@
+from __future__ import annotations
+
+from typing import AsyncIterator, Protocol
+
+
+class Provider(Protocol):
+    async def chat(self, body: dict) -> dict: ...
+
+    def chat_stream(self, body: dict) -> AsyncIterator[bytes]: ...
+
+    async def embeddings(self, body: dict) -> dict: ...
+
+    async def rerank(self, body: dict) -> dict: ...
