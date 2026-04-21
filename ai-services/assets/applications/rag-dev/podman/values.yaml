@@ -62,7 +62,7 @@ summarize:
 
 llmGateway:
   # @hidden
-  image: llm-gateway:dev
+  image: localhost/llm-gateway:dev
   # @hidden
   masterKey: ""
   # @description IBM watsonx API key for cloud LLM access. Leave empty to use local vLLM only.
