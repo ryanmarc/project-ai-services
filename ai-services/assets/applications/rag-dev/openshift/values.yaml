@@ -65,3 +65,5 @@ llmGateway:
   watsonxApiKey: ""
   # @description IBM watsonx project ID. Required when watsonxApiKey is set.
   watsonxProjectId: ""
+  # @description IBM watsonx regional endpoint URL (e.g. https://us-south.ml.cloud.ibm.com).
+  watsonxUrl: "https://us-south.ml.cloud.ibm.com"

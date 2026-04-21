@@ -25,6 +25,8 @@ spec:
           value: "{{ .Values.llmGateway.watsonxApiKey }}"
         - name: WATSONX_PROJECT_ID
           value: "{{ .Values.llmGateway.watsonxProjectId }}"
+        - name: WATSONX_URL
+          value: "{{ .Values.llmGateway.watsonxUrl }}"
       ports:
         - containerPort: 4000
           protocol: TCP

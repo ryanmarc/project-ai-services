@@ -46,6 +46,8 @@ spec:
                 secretKeyRef:
                   name: "llm-gateway-credentials"
                   key: watsonx-project-id
+            - name: WATSONX_URL
+              value: "{{ .Values.llmGateway.watsonxUrl }}"
           ports:
             - containerPort: 4000
               protocol: TCP
