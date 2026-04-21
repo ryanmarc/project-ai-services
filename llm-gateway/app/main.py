@@ -4,6 +4,7 @@ import hmac
 import json
 import os
 import typing
+from contextlib import asynccontextmanager
 
 import httpx
 from fastapi import FastAPI, HTTPException, Request, status
@@ -32,7 +33,15 @@ def _resolve_master_key(ref: str | None) -> str | None:
 
 
 def create_app(cfg: GatewayConfig, providers: dict[str, Provider] | None = None) -> FastAPI:
-    app = FastAPI(title="llm-gateway")
+    @asynccontextmanager
+    async def lifespan(app: FastAPI):
+        yield
+        for provider in app.state.providers.values():
+            close = getattr(provider, "aclose", None)
+            if close is not None:
+                await close()
+
+    app = FastAPI(title="llm-gateway", lifespan=lifespan)
     app.state.config = cfg
     app.state.providers = providers if providers is not None else build_providers(cfg)
 

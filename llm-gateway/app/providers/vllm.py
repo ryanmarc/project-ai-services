@@ -14,6 +14,7 @@ class VLLMProvider:
         self.entry = entry
         self.timeout = timeout
         self._transport: httpx.BaseTransport | None = None
+        self._cached_client: httpx.AsyncClient | None = None
 
     # --- Upstream address helpers -----------------------------------------
 
@@ -24,10 +25,17 @@ class VLLMProvider:
         return resolve_env_ref(self.entry.params["api_base"]).rstrip("/")
 
     def _client(self) -> httpx.AsyncClient:
-        kwargs: dict = {"timeout": self.timeout}
-        if self._transport is not None:
-            kwargs["transport"] = self._transport
-        return httpx.AsyncClient(**kwargs)
+        if self._cached_client is None:
+            kwargs: dict = {"timeout": self.timeout}
+            if self._transport is not None:
+                kwargs["transport"] = self._transport
+            self._cached_client = httpx.AsyncClient(**kwargs)
+        return self._cached_client
+
+    async def aclose(self) -> None:
+        if self._cached_client is not None:
+            await self._cached_client.aclose()
+            self._cached_client = None
 
     def _rewrite_model(self, body: dict) -> dict:
         return {**body, "model": self._upstream_model()}
@@ -35,43 +43,39 @@ class VLLMProvider:
     # --- Public provider API ----------------------------------------------
 
     async def chat(self, body: dict) -> dict:
-        async with self._client() as c:
-            r = await c.post(
-                f"{self._api_base()}/chat/completions",
-                json=self._rewrite_model(body),
-            )
-            r.raise_for_status()
-            return r.json()
+        c = self._client()
+        r = await c.post(
+            f"{self._api_base()}/chat/completions",
+            json=self._rewrite_model(body),
+        )
+        r.raise_for_status()
+        return r.json()
 
     async def chat_stream(self, body: dict) -> AsyncIterator[bytes]:
         body = {**self._rewrite_model(body), "stream": True}
-        client = self._client()
-        try:
-            async with client.stream(
-                "POST",
-                f"{self._api_base()}/chat/completions",
-                json=body,
-            ) as r:
-                r.raise_for_status()
-                async for chunk in r.aiter_raw():
-                    yield chunk
-        finally:
-            await client.aclose()
+        async with self._client().stream(
+            "POST",
+            f"{self._api_base()}/chat/completions",
+            json=body,
+        ) as r:
+            r.raise_for_status()
+            async for chunk in r.aiter_raw():
+                yield chunk
 
     async def embeddings(self, body: dict) -> dict:
-        async with self._client() as c:
-            r = await c.post(
-                f"{self._api_base()}/embeddings",
-                json=self._rewrite_model(body),
-            )
-            r.raise_for_status()
-            return r.json()
+        c = self._client()
+        r = await c.post(
+            f"{self._api_base()}/embeddings",
+            json=self._rewrite_model(body),
+        )
+        r.raise_for_status()
+        return r.json()
 
     async def rerank(self, body: dict) -> dict:
-        async with self._client() as c:
-            r = await c.post(
-                f"{self._api_base()}/rerank",
-                json=self._rewrite_model(body),
-            )
-            r.raise_for_status()
-            return r.json()
+        c = self._client()
+        r = await c.post(
+            f"{self._api_base()}/rerank",
+            json=self._rewrite_model(body),
+        )
+        r.raise_for_status()
+        return r.json()

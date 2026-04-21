@@ -170,6 +170,25 @@ def test_upstream_http_error_becomes_502():
     assert r.json()["error"]["type"] == "upstream"
 
 
+def test_lifespan_calls_aclose_on_providers():
+    class ClosableProvider(_FakeProvider):
+        closed = False
+
+        async def aclose(self):
+            type(self).closed = True
+
+    provider = ClosableProvider()
+    cfg = GatewayConfig(
+        models={"m": ModelEntry(model_name="m", params={"model": "openai/x"})},
+        master_key_ref=None,
+        request_timeout=5.0,
+    )
+    app = create_app(cfg, providers={"m": provider})
+    with TestClient(app) as client:
+        assert client.get("/health").status_code == 200
+    assert ClosableProvider.closed is True
+
+
 def test_watsonx_rerank_notimplemented_becomes_501():
     class WxLike:
         async def chat(self, body):  # pragma: no cover

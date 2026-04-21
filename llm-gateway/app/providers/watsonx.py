@@ -20,6 +20,7 @@ class WatsonxProvider:
         self.entry = entry
         self.timeout = timeout
         self._transport: httpx.BaseTransport | None = None
+        self._cached_client: httpx.AsyncClient | None = None
         self._token: str | None = None
         self._token_expires_at: float = 0.0
         self._token_lock = asyncio.Lock()
@@ -42,10 +43,17 @@ class WatsonxProvider:
         return resolve_env_ref(self.entry.params["api_base"]).rstrip("/")
 
     def _client(self) -> httpx.AsyncClient:
-        kwargs: dict = {"timeout": self.timeout}
-        if self._transport is not None:
-            kwargs["transport"] = self._transport
-        return httpx.AsyncClient(**kwargs)
+        if self._cached_client is None:
+            kwargs: dict = {"timeout": self.timeout}
+            if self._transport is not None:
+                kwargs["transport"] = self._transport
+            self._cached_client = httpx.AsyncClient(**kwargs)
+        return self._cached_client
+
+    async def aclose(self) -> None:
+        if self._cached_client is not None:
+            await self._cached_client.aclose()
+            self._cached_client = None
 
     # --- Auth -------------------------------------------------------------
 
@@ -56,14 +64,14 @@ class WatsonxProvider:
             now = time.time()
             if self._token and self._token_expires_at - _TOKEN_REFRESH_BUFFER > now:
                 return self._token
-            async with self._client() as c:
-                r = await c.post(
-                    _IAM_URL,
-                    data={"grant_type": _IAM_GRANT, "apikey": self._api_key()},
-                    headers={"Content-Type": "application/x-www-form-urlencoded"},
-                )
-                r.raise_for_status()
-                payload = r.json()
+            c = self._client()
+            r = await c.post(
+                _IAM_URL,
+                data={"grant_type": _IAM_GRANT, "apikey": self._api_key()},
+                headers={"Content-Type": "application/x-www-form-urlencoded"},
+            )
+            r.raise_for_status()
+            payload = r.json()
             self._token = payload["access_token"]
             self._token_expires_at = now + int(payload["expires_in"])
             return self._token
@@ -118,42 +126,38 @@ class WatsonxProvider:
     async def chat(self, body: dict) -> dict:
         token = await self._get_bearer()
         wx_body = self._to_watsonx_chat_body(body)
-        async with self._client() as c:
-            r = await c.post(
-                f"{self._watsonx_url()}/ml/v1/text/chat?version=2024-05-31",
-                json=wx_body,
-                headers={"Authorization": f"Bearer {token}"},
-            )
-            r.raise_for_status()
-            return self._from_watsonx_chat_response(r.json(), body["model"])
+        c = self._client()
+        r = await c.post(
+            f"{self._watsonx_url()}/ml/v1/text/chat?version=2024-05-31",
+            json=wx_body,
+            headers={"Authorization": f"Bearer {token}"},
+        )
+        r.raise_for_status()
+        return self._from_watsonx_chat_response(r.json(), body["model"])
 
     async def chat_stream(self, body: dict):
         token = await self._get_bearer()
         wx_body = self._to_watsonx_chat_body(body)
         chat_id = f"chatcmpl-{uuid.uuid4().hex}"
         created = int(time.time())
-        client = self._client()
-        try:
-            async with client.stream(
-                "POST",
-                f"{self._watsonx_url()}/ml/v1/text/chat_stream?version=2024-05-31",
-                json=wx_body,
-                headers={"Authorization": f"Bearer {token}"},
-            ) as r:
-                r.raise_for_status()
-                buf = b""
-                async for raw in r.aiter_raw():
-                    buf += raw
-                    while b"\n\n" in buf:
-                        frame, buf = buf.split(b"\n\n", 1)
-                        for chunk in self._translate_sse_frame(frame, body["model"], chat_id, created):
-                            yield chunk
-                if buf.strip():
-                    for chunk in self._translate_sse_frame(buf, body["model"], chat_id, created):
+        async with self._client().stream(
+            "POST",
+            f"{self._watsonx_url()}/ml/v1/text/chat_stream?version=2024-05-31",
+            json=wx_body,
+            headers={"Authorization": f"Bearer {token}"},
+        ) as r:
+            r.raise_for_status()
+            buf = b""
+            async for raw in r.aiter_raw():
+                buf += raw
+                while b"\n\n" in buf:
+                    frame, buf = buf.split(b"\n\n", 1)
+                    for chunk in self._translate_sse_frame(frame, body["model"], chat_id, created):
                         yield chunk
-            yield b"data: [DONE]\n\n"
-        finally:
-            await client.aclose()
+            if buf.strip():
+                for chunk in self._translate_sse_frame(buf, body["model"], chat_id, created):
+                    yield chunk
+        yield b"data: [DONE]\n\n"
 
     def _translate_sse_frame(
         self, frame: bytes, model_name: str, chat_id: str, created: int
@@ -198,14 +202,14 @@ class WatsonxProvider:
             "project_id": self._project_id(),
             "inputs": inputs,
         }
-        async with self._client() as c:
-            r = await c.post(
-                f"{self._watsonx_url()}/ml/v1/text/embeddings?version=2024-05-31",
-                json=wx_body,
-                headers={"Authorization": f"Bearer {token}"},
-            )
-            r.raise_for_status()
-            payload = r.json()
+        c = self._client()
+        r = await c.post(
+            f"{self._watsonx_url()}/ml/v1/text/embeddings?version=2024-05-31",
+            json=wx_body,
+            headers={"Authorization": f"Bearer {token}"},
+        )
+        r.raise_for_status()
+        payload = r.json()
         return {
             "object": "list",
             "model": body["model"],
