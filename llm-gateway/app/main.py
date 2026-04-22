@@ -113,7 +113,8 @@ def create_app(cfg: GatewayConfig, providers: dict[str, Provider] | None = None)
         provider = _lookup(body)
         return await provider.embeddings(body)
 
-    @app.post("/rerank")
+    @app.post("/v1/rerank")
+    @app.post("/v2/rerank")
     async def rerank(request: Request):
         body = await _read_body(request)
         provider = _lookup(body)
