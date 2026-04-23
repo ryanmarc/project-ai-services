@@ -164,17 +164,17 @@ class WatsonxProvider:
         ) as r:
             r.raise_for_status()
             # Watsonx streaming responses are already in OpenAI format
-            # Just pass through the SSE frames, updating the model name
+            # Use aiter_bytes() instead of aiter_raw() to handle gzip decompression
             buf = b""
-            async for raw in r.aiter_raw():
-                buf += raw
+            async for chunk in r.aiter_bytes():
+                buf += chunk
                 while b"\n\n" in buf:
                     frame, buf = buf.split(b"\n\n", 1)
-                    for chunk in self._passthrough_sse_frame(frame, body["model"]):
-                        yield chunk
+                    for sse_chunk in self._passthrough_sse_frame(frame, body["model"]):
+                        yield sse_chunk
             if buf.strip():
-                for chunk in self._passthrough_sse_frame(buf, body["model"]):
-                    yield chunk
+                for sse_chunk in self._passthrough_sse_frame(buf, body["model"]):
+                    yield sse_chunk
         yield b"data: [DONE]\n\n"
 
 
