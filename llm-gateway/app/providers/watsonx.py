@@ -90,38 +90,40 @@ class WatsonxProvider:
         for src, dst in self._OPENAI_TO_WX_PARAMS.items():
             if src in body:
                 params[dst] = body[src]
+
+        # Transform messages to watsonx format
+        # Watsonx expects content as array of objects with type and text fields
+        messages = []
+        for msg in body.get("messages", []):
+            transformed_msg = {"role": msg.get("role", "user")}
+            content = msg.get("content", "")
+
+            # If content is already in watsonx format (list), use as-is
+            if isinstance(content, list):
+                transformed_msg["content"] = content
+            # Otherwise, transform string content to watsonx format
+            else:
+                transformed_msg["content"] = [
+                    {
+                        "type": "text",
+                        "text": content
+                    }
+                ]
+            messages.append(transformed_msg)
+
         return {
             "model_id": self._model_id(),
             "project_id": self._project_id(),
-            "messages": body.get("messages", []),
+            "messages": messages,
             "parameters": params,
         }
 
     def _from_watsonx_chat_response(self, payload: dict, model_name: str) -> dict:
-        result = payload["results"][0]
-        prompt_tokens = result.get("input_token_count", 0)
-        completion_tokens = result.get("generated_token_count", 0)
-        return {
-            "id": f"chatcmpl-{uuid.uuid4().hex}",
-            "object": "chat.completion",
-            "created": int(time.time()),
-            "model": model_name,
-            "choices": [
-                {
-                    "index": 0,
-                    "message": {
-                        "role": "assistant",
-                        "content": result.get("generated_text", ""),
-                    },
-                    "finish_reason": result.get("stop_reason", "stop"),
-                }
-            ],
-            "usage": {
-                "prompt_tokens": prompt_tokens,
-                "completion_tokens": completion_tokens,
-                "total_tokens": prompt_tokens + completion_tokens,
-            },
-        }
+        # Watsonx text/chat response already has the correct structure
+        # Just need to ensure it has the model name we expect
+        response = payload.copy()
+        response["model"] = model_name
+        return response
 
     async def chat(self, body: dict) -> dict:
         token = await self._get_bearer()
