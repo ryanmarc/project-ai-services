@@ -189,7 +189,7 @@ def test_lifespan_calls_aclose_on_providers():
     assert ClosableProvider.closed is True
 
 
-def test_watsonx_rerank_notimplemented_becomes_501():
+def test_watsonx_rerank_works():
     class WxLike:
         async def chat(self, body):  # pragma: no cover
             return {}
@@ -201,8 +201,14 @@ def test_watsonx_rerank_notimplemented_becomes_501():
             return {}
 
         async def rerank(self, body):
-            raise NotImplementedError("rerank not supported")
+            return {
+                "id": "rerank-123",
+                "results": [{"index": 0, "relevance_score": 0.95}],
+                "model": body["model"],
+            }
 
     client = _client({"m": WxLike()})
-    r = client.post("/rerank", json={"model": "m"})
-    assert r.status_code == 501
+    r = client.post("/v1/rerank", json={"model": "m", "query": "test", "documents": ["doc1"]})
+    assert r.status_code == 200
+    assert r.json()["model"] == "m"
+    assert len(r.json()["results"]) == 1

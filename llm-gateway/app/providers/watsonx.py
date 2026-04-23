@@ -119,11 +119,27 @@ class WatsonxProvider:
         }
 
     def _from_watsonx_chat_response(self, payload: dict, model_name: str) -> dict:
-        # Watsonx text/chat response already has the correct structure
+        # Watsonx text/chat response is already in OpenAI format
         # Just need to ensure it has the model name we expect
         response = payload.copy()
         response["model"] = model_name
         return response
+
+    def _passthrough_sse_frame(self, frame: bytes, model_name: str):
+        """Pass through watsonx SSE frames, updating the model name."""
+        for line in frame.splitlines():
+            if not line.startswith(b"data:"):
+                continue
+            payload_text = line[5:].strip()
+            if not payload_text or payload_text == b"[DONE]":
+                continue
+            try:
+                payload = json.loads(payload_text)
+            except json.JSONDecodeError:
+                continue
+            # Watsonx response is already in OpenAI format, just update model name
+            payload["model"] = model_name
+            yield b"data: " + json.dumps(payload).encode() + b"\n\n"
 
     async def chat(self, body: dict) -> dict:
         token = await self._get_bearer()
@@ -140,8 +156,6 @@ class WatsonxProvider:
     async def chat_stream(self, body: dict):
         token = await self._get_bearer()
         wx_body = self._to_watsonx_chat_body(body)
-        chat_id = f"chatcmpl-{uuid.uuid4().hex}"
-        created = int(time.time())
         async with self._client().stream(
             "POST",
             f"{self._watsonx_url()}/ml/v1/text/chat_stream?version=2024-05-31",
@@ -149,51 +163,20 @@ class WatsonxProvider:
             headers={"Authorization": f"Bearer {token}"},
         ) as r:
             r.raise_for_status()
+            # Watsonx streaming responses are already in OpenAI format
+            # Just pass through the SSE frames, updating the model name
             buf = b""
             async for raw in r.aiter_raw():
                 buf += raw
                 while b"\n\n" in buf:
                     frame, buf = buf.split(b"\n\n", 1)
-                    for chunk in self._translate_sse_frame(frame, body["model"], chat_id, created):
+                    for chunk in self._passthrough_sse_frame(frame, body["model"]):
                         yield chunk
             if buf.strip():
-                for chunk in self._translate_sse_frame(buf, body["model"], chat_id, created):
+                for chunk in self._passthrough_sse_frame(buf, body["model"]):
                     yield chunk
         yield b"data: [DONE]\n\n"
 
-    def _translate_sse_frame(
-        self, frame: bytes, model_name: str, chat_id: str, created: int
-    ):
-        for line in frame.splitlines():
-            if not line.startswith(b"data:"):
-                continue
-            payload_text = line[5:].strip()
-            if not payload_text or payload_text == b"[DONE]":
-                continue
-            try:
-                payload = json.loads(payload_text)
-            except json.JSONDecodeError:
-                continue
-            result = (payload.get("results") or [{}])[0]
-            delta: dict = {}
-            text = result.get("generated_text")
-            if text:
-                delta["content"] = text
-            finish_reason = result.get("stop_reason")
-            openai_chunk = {
-                "id": chat_id,
-                "object": "chat.completion.chunk",
-                "created": created,
-                "model": model_name,
-                "choices": [
-                    {
-                        "index": 0,
-                        "delta": delta,
-                        "finish_reason": finish_reason,
-                    }
-                ],
-            }
-            yield b"data: " + json.dumps(openai_chunk).encode() + b"\n\n"
 
     async def embeddings(self, body: dict) -> dict:
         token = await self._get_bearer()

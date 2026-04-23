@@ -103,14 +103,22 @@ async def test_chat_translates_request_and_response():
         return httpx.Response(
             200,
             json={
-                "results": [
+                "object": "chat.completion",
+                "choices": [
                     {
-                        "generated_text": "hello world",
-                        "input_token_count": 7,
-                        "generated_token_count": 2,
-                        "stop_reason": "eos_token",
+                        "index": 0,
+                        "message": {
+                            "role": "assistant",
+                            "content": "hello world",
+                        },
+                        "finish_reason": "eos_token",
                     }
-                ]
+                ],
+                "usage": {
+                    "prompt_tokens": 7,
+                    "completion_tokens": 2,
+                    "total_tokens": 9,
+                },
             },
         )
 
@@ -133,7 +141,8 @@ async def test_chat_translates_request_and_response():
     body = _json.loads(captured["body"])
     assert body["model_id"] == "ibm/granite-3-8b-instruct"
     assert body["project_id"] == "the-project"
-    assert body["messages"] == [{"role": "user", "content": "hi"}]
+    # Watsonx expects content as array of objects with type and text fields
+    assert body["messages"] == [{"role": "user", "content": [{"type": "text", "text": "hi"}]}]
     assert body["parameters"] == {"max_tokens": 64, "temperature": 0.2}
 
     assert resp["object"] == "chat.completion"
@@ -148,10 +157,11 @@ async def test_chat_translates_request_and_response():
 
 
 async def test_chat_stream_translates_watsonx_sse_to_openai_chunks():
+    # Watsonx streaming responses are already in OpenAI format
     wx_sse = (
-        b'data: {"results":[{"generated_text":"hel"}]}\n\n'
-        b'data: {"results":[{"generated_text":"lo"}]}\n\n'
-        b'data: {"results":[{"generated_text":"","stop_reason":"eos_token"}]}\n\n'
+        b'data: {"choices":[{"index":0,"delta":{"content":"hel"},"finish_reason":null}]}\n\n'
+        b'data: {"choices":[{"index":0,"delta":{"content":"lo"},"finish_reason":null}]}\n\n'
+        b'data: {"choices":[{"index":0,"delta":{},"finish_reason":"eos_token"}]}\n\n'
     )
 
     def handler(request: httpx.Request) -> httpx.Response:
@@ -170,10 +180,11 @@ async def test_chat_stream_translates_watsonx_sse_to_openai_chunks():
         chunks.append(c)
 
     joined = b"".join(chunks)
-    # Expect OpenAI-shaped chunk frames with content, finish_reason, then DONE.
+    # Expect OpenAI-shaped chunk frames with content, finish_reason, model name, then DONE.
     assert b'"delta": {"content": "hel"}' in joined
     assert b'"delta": {"content": "lo"}' in joined
     assert b'"finish_reason": "eos_token"' in joined
+    assert b'"model": "granite-wx"' in joined
     assert joined.endswith(b"data: [DONE]\n\n")
 
 
@@ -195,8 +206,8 @@ async def test_chat_stream_handles_frame_split_across_reads():
     # Watsonx sends a single logical SSE frame, but TCP coalesces it into two
     # byte chunks that split the JSON payload mid-token.
     chunks = [
-        b'data: {"results":[{"gen',
-        b'erated_text":"hello","stop_reason":"eos_token"}]}\n\n',
+        b'data: {"choices":[{"index":0,"delta":{"con',
+        b'tent":"hello"},"finish_reason":"eos_token"}]}\n\n',
     ]
 
     def handler(request: httpx.Request) -> httpx.Response:
@@ -221,7 +232,7 @@ async def test_chat_stream_handles_frame_split_across_reads():
 async def test_chat_stream_flushes_trailing_frame_without_final_blank_line():
     # Stream ends without a trailing \n\n — the buffer-flush path must still
     # emit the last frame.
-    body_bytes = b'data: {"results":[{"generated_text":"bye","stop_reason":"eos_token"}]}\n'
+    body_bytes = b'data: {"choices":[{"index":0,"delta":{"content":"bye"},"finish_reason":"eos_token"}]}\n'
 
     def handler(request: httpx.Request) -> httpx.Response:
         if request.url.host == "iam.cloud.ibm.com":
@@ -284,7 +295,26 @@ async def test_embeddings_wraps_string_input_in_list():
     assert captured["body"]["inputs"] == ["single-string"]
 
 
-async def test_rerank_returns_501():
-    p = _make(httpx.MockTransport(lambda req: httpx.Response(500)))
-    with pytest.raises(NotImplementedError):
-        await p.rerank({"model": "granite-wx"})
+async def test_rerank_works():
+    def handler(request: httpx.Request) -> httpx.Response:
+        if request.url.host == "iam.cloud.ibm.com":
+            return httpx.Response(200, json={"access_token": "t", "expires_in": 3600})
+        return httpx.Response(
+            200,
+            json={
+                "results": [
+                    {"index": 0, "score": 0.95},
+                    {"index": 1, "score": 0.75},
+                ]
+            },
+        )
+
+    p = _make(httpx.MockTransport(handler))
+    resp = await p.rerank({
+        "model": "granite-wx",
+        "query": "test query",
+        "documents": ["doc1", "doc2"],
+    })
+    assert resp["model"] == "granite-wx"
+    assert len(resp["results"]) == 2
+    assert resp["results"][0]["relevance_score"] == 0.95
