@@ -220,6 +220,48 @@ class WatsonxProvider:
         }
 
     async def rerank(self, body: dict) -> dict:
-        raise NotImplementedError(
-            "rerank is not implemented for watsonx provider"
+        token = await self._get_bearer()
+        query = body.get("query", "")
+        documents = body.get("documents", [])
+
+        # Build watsonx rerank request body
+        wx_body = {
+            "model_id": self._model_id(),
+            "project_id": self._project_id(),
+            "query": query,
+            "inputs": documents,
+        }
+
+        # Add optional parameters if present
+        if "top_n" in body:
+            wx_body["top_n"] = body["top_n"]
+        if "return_documents" in body:
+            wx_body["return_documents"] = body["return_documents"]
+        if "return_query" in body:
+            wx_body["return_query"] = body["return_query"]
+
+        c = self._client()
+        r = await c.post(
+            f"{self._watsonx_url()}/ml/v1/text/rerank?version=2024-05-31",
+            json=wx_body,
+            headers={"Authorization": f"Bearer {token}"},
         )
+        r.raise_for_status()
+        payload = r.json()
+
+        # Transform watsonx response to expected format
+        results = []
+        for i, result in enumerate(payload.get("results", [])):
+            results.append({
+                "index": result.get("index", i),
+                "relevance_score": result.get("score", 0.0),
+            })
+            # Include document if present in response
+            if "document" in result:
+                results[-1]["document"] = result["document"]
+
+        return {
+            "id": f"rerank-{uuid.uuid4().hex}",
+            "results": results,
+            "model": body["model"],
+        }
