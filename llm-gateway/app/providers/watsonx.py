@@ -226,21 +226,36 @@ class WatsonxProvider:
         query = body.get("query", "")
         documents = body.get("documents", [])
 
+        # Transform documents to watsonx format
+        # Each document should be an object with a "text" field
+        inputs = []
+        for doc in documents:
+            if isinstance(doc, dict):
+                # If already in correct format, use as-is
+                inputs.append(doc)
+            else:
+                # If string, wrap in {"text": ...} format
+                inputs.append({"text": doc})
+
         # Build watsonx rerank request body
         wx_body = {
             "model_id": self._model_id(),
             "project_id": self._project_id(),
             "query": query,
-            "inputs": documents,
+            "inputs": inputs,
         }
 
-        # Add optional parameters if present
+        # Add optional parameters under parameters.return_options
+        return_options = {}
         if "top_n" in body:
-            wx_body["top_n"] = body["top_n"]
+            return_options["top_n"] = body["top_n"]
         if "return_documents" in body:
-            wx_body["return_documents"] = body["return_documents"]
+            return_options["return_documents"] = body["return_documents"]
         if "return_query" in body:
-            wx_body["return_query"] = body["return_query"]
+            return_options["return_query"] = body["return_query"]
+
+        if return_options:
+            wx_body["parameters"] = {"return_options": return_options}
 
         c = self._client()
         r = await c.post(
