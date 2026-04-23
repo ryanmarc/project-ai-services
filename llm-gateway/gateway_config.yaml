@@ -24,6 +24,20 @@ model_list:
       watsonx_project_id: os.environ/WATSONX_PROJECT_ID
       api_base: os.environ/WATSONX_URL
 
+  - model_name: granite-embedding-278m-multilingual-wx
+    params:
+      model: watsonx/ibm/granite-embedding-278m-multilingual
+      api_key: os.environ/WATSONX_API_KEY
+      watsonx_project_id: os.environ/WATSONX_PROJECT_ID
+      api_base: os.environ/WATSONX_URL
+
+  - model_name: ms-marco-minilm-l-12-v2-wx
+    params:
+      model: watsonx/cross-encoder/ms-marco-minilm-l-12-v2
+      api_key: os.environ/WATSONX_API_KEY
+      watsonx_project_id: os.environ/WATSONX_PROJECT_ID
+      api_base: os.environ/WATSONX_URL
+
 general_settings:
   master_key: os.environ/GATEWAY_MASTER_KEY
 
