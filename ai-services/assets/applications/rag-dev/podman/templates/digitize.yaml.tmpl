@@ -68,13 +68,13 @@ spec:
         - name: EMB_ENDPOINT
           value: "http://{{ .AppName }}--llm-gateway:4000"
         - name: EMB_MODEL
-          value: "granite-embedding-278m"
+          value: "{{ .Values.digitize.emb_model }}"
         - name: EMB_MAX_TOKENS
           value: "512"
         - name: LLM_ENDPOINT
           value: "http://{{ .AppName }}--llm-gateway:4000"
         - name: LLM_MODEL
-          value: "granite-3.3-8b-instruct"
+          value: "{{ .Values.digitize.llm_model }}"
         - name: VLLM_TOKENIZER_ENDPOINT
           value: "http://{{ .AppName }}--vllm-server:8001"
         - name: OPENSEARCH_HOST

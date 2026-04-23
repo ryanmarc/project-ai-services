@@ -11,6 +11,12 @@ backend:
   image: icr.io/ai-services-cicd/rag:v0.0.86
   # @hidden
   log_level: "INFO"
+  # @hidden
+  llm_model: "granite-3.3-8b-instruct"
+  # @hidden
+  emb_model: "granite-embedding-278m"
+  # @hidden
+  reranker_model: "bge-reranker-v2-m3"
 
 digitize:
   # @description Host port for the DIGITIZE API. If unspecified, a random available port is assigned. Specify a port number to use a custom value.
@@ -19,6 +25,10 @@ digitize:
   image: icr.io/ai-services-cicd/rag:v0.0.86
   # @hidden
   log_level: "INFO"
+  # @hidden
+  llm_model: "granite-3.3-8b-instruct"
+  # @hidden
+  emb_model: "granite-embedding-278m"
 
 digitizeUi:
   # @description Host port for the DIGITIZE UI. If unspecified, a random available port is assigned. Specify a port number to use a custom value.
@@ -29,6 +39,10 @@ digitizeUi:
 ingest:
   # @hidden
   log_level: "INFO"
+  # @hidden
+  llm_model: "granite-3.3-8b-instruct"
+  # @hidden
+  emb_model: "granite-embedding-278m"
 
 opensearch:
   # @hidden
@@ -59,6 +73,10 @@ summarize:
   image: icr.io/ai-services-cicd/rag:v0.0.86
   # @hidden
   log_level: "INFO"
+  # @hidden
+  llm_model: "granite-3.3-8b-instruct"
+  # @hidden
+  emb_model: "granite-embedding-278m"
 
 llmGateway:
   # @hidden
