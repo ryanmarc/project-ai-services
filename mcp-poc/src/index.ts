@@ -54,7 +54,7 @@ server.registerTool(
     }
 
     // Build the command
-    let command = `ai-services application create ${typedArgs.name} --template ${typedArgs.template}`;
+    let command = `ai-services application create ${typedArgs.name} --template ${typedArgs.template} --runtime podman`;
 
     // Add optional flags
     if (typedArgs.params && typedArgs.params.length > 0) {
