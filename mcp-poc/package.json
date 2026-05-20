@@ -1,0 +1,28 @@
+{
+  "name": "mcp-poc",
+  "version": "1.0.0",
+  "description": "MCP server POC that wraps ai-services application create command",
+  "type": "module",
+  "main": "dist/index.js",
+  "scripts": {
+    "build": "tsc",
+    "start": "node dist/index.js",
+    "dev": "tsc && node dist/index.js"
+  },
+  "keywords": [
+    "mcp",
+    "ai-services",
+    "application"
+  ],
+  "author": "",
+  "license": "MIT",
+  "dependencies": {
+    "@modelcontextprotocol/sdk": "^1.0.4",
+    "express": "^4.21.2"
+  },
+  "devDependencies": {
+    "@types/node": "^22.10.2",
+    "@types/express": "^5.0.0",
+    "typescript": "^5.7.2"
+  }
+}
