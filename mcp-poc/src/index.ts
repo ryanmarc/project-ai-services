@@ -3,11 +3,20 @@
 import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { StreamableHTTPServerTransport } from "@modelcontextprotocol/sdk/server/streamableHttp.js";
 import { z } from "zod";
-import { exec } from "child_process";
+import { exec, spawn } from "child_process";
 import { promisify } from "util";
 import express, { Request, Response } from "express";
 
 const execAsync = promisify(exec);
+
+// Track running operations
+const runningOperations = new Map<string, {
+  command: string;
+  startTime: Date;
+  status: 'running' | 'completed' | 'failed';
+  output: string[];
+  error?: string;
+}>();
 
 // Create server instance
 const server = new McpServer(
@@ -87,28 +96,92 @@ server.registerTool(
       command += ` --timeout ${typedArgs.timeout}`;
     }
 
-    try {
-      // Execute the command
-      const { stdout, stderr } = await execAsync(command);
+    // Generate operation ID
+    const operationId = `${typedArgs.name}-${Date.now()}`;
 
-      return {
-        content: [
-          {
-            type: "text",
-            text: JSON.stringify(
-              {
-                success: true,
-                command: command,
-                stdout: stdout,
-                stderr: stderr,
-              },
-              null,
-              2
-            ),
-          },
-        ],
-      };
-    } catch (error: any) {
+    // Initialize operation tracking
+    runningOperations.set(operationId, {
+      command,
+      startTime: new Date(),
+      status: 'running',
+      output: []
+    });
+
+    // Execute command asynchronously without waiting
+    const child = spawn('sh', ['-c', command], {
+      stdio: ['ignore', 'pipe', 'pipe']
+    });
+
+    let stdout = '';
+    let stderr = '';
+
+    child.stdout?.on('data', (data) => {
+      const text = data.toString();
+      stdout += text;
+      const op = runningOperations.get(operationId);
+      if (op) {
+        op.output.push(text);
+      }
+    });
+
+    child.stderr?.on('data', (data) => {
+      const text = data.toString();
+      stderr += text;
+      const op = runningOperations.get(operationId);
+      if (op) {
+        op.output.push(text);
+      }
+    });
+
+    child.on('close', (code) => {
+      const op = runningOperations.get(operationId);
+      if (op) {
+        op.status = code === 0 ? 'completed' : 'failed';
+        if (code !== 0) {
+          op.error = `Process exited with code ${code}`;
+        }
+      }
+    });
+
+    // Return immediately with operation ID
+    return {
+      content: [
+        {
+          type: "text",
+          text: JSON.stringify(
+            {
+              success: true,
+              operationId,
+              message: "Application creation started. Use check_operation_status to monitor progress.",
+              command,
+              note: "This is a long-running operation. The process is running in the background."
+            },
+            null,
+            2
+          ),
+        },
+      ],
+    };
+  }
+);
+
+// Register status checking tool
+const CheckOperationStatusSchema = z.object({
+  operationId: z.string().describe("The operation ID returned from create_application"),
+});
+
+server.registerTool(
+  "check_operation_status",
+  {
+    description: "Check the status of a long-running application creation operation. Returns current status, output, and completion state.",
+    inputSchema: CheckOperationStatusSchema,
+  },
+  async (args) => {
+    const typedArgs = args as z.infer<typeof CheckOperationStatusSchema>;
+
+    const operation = runningOperations.get(typedArgs.operationId);
+
+    if (!operation) {
       return {
         content: [
           {
@@ -116,10 +189,8 @@ server.registerTool(
             text: JSON.stringify(
               {
                 success: false,
-                command: command,
-                error: error.message,
-                stdout: error.stdout || "",
-                stderr: error.stderr || "",
+                error: "Operation not found",
+                operationId: typedArgs.operationId
               },
               null,
               2
@@ -129,6 +200,66 @@ server.registerTool(
         isError: true,
       };
     }
+
+    const duration = Date.now() - operation.startTime.getTime();
+    const durationSeconds = Math.floor(duration / 1000);
+
+    return {
+      content: [
+        {
+          type: "text",
+          text: JSON.stringify(
+            {
+              success: true,
+              operationId: typedArgs.operationId,
+              status: operation.status,
+              command: operation.command,
+              duration: `${durationSeconds}s`,
+              output: operation.output.slice(-20), // Last 20 lines
+              error: operation.error,
+              isComplete: operation.status !== 'running'
+            },
+            null,
+            2
+          ),
+        },
+      ],
+    };
+  }
+);
+
+// Register list operations tool
+server.registerTool(
+  "list_operations",
+  {
+    description: "List all tracked operations (running, completed, and failed)",
+    inputSchema: z.object({}),
+  },
+  async () => {
+    const operations = Array.from(runningOperations.entries()).map(([id, op]) => ({
+      operationId: id,
+      status: op.status,
+      command: op.command,
+      startTime: op.startTime.toISOString(),
+      duration: `${Math.floor((Date.now() - op.startTime.getTime()) / 1000)}s`
+    }));
+
+    return {
+      content: [
+        {
+          type: "text",
+          text: JSON.stringify(
+            {
+              success: true,
+              operations,
+              count: operations.length
+            },
+            null,
+            2
+          ),
+        },
+      ],
+    };
   }
 );
 
