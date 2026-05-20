@@ -1,10 +1,9 @@
 # Multi-stage build for mcp-poc
 FROM registry.access.redhat.com/ubi9/ubi:9.7 AS builder
 
-# Install Node.js 18 from NodeSource
-RUN dnf install -y curl && \
-    curl -fsSL https://rpm.nodesource.com/setup_18.x | bash - && \
-    dnf install -y nodejs && \
+# Install Node.js 24 using DNF module
+RUN dnf module enable nodejs:24 -y && \
+    dnf install nodejs -y && \
     dnf clean all
 
 # Set working directory
@@ -26,10 +25,9 @@ RUN npm run build
 # Production stage
 FROM registry.access.redhat.com/ubi9/ubi:9.7
 
-# Install Node.js 18 runtime
-RUN dnf install -y curl && \
-    curl -fsSL https://rpm.nodesource.com/setup_18.x | bash - && \
-    dnf install -y nodejs && \
+# Install Node.js 24 runtime using DNF module
+RUN dnf module enable nodejs:24 -y && \
+    dnf install nodejs -y && \
     dnf clean all
 
 # Set working directory
