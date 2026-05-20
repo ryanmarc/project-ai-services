@@ -138,22 +138,37 @@ async function main() {
   const PORT = parseInt(process.env.PORT || "3000", 10);
   const HOST = process.env.HOST || "0.0.0.0";
 
-  // Create the transport instance
-  const transport = new StreamableHTTPServerTransport();
-
-  // Connect the server to the transport
-  await server.server.connect(transport);
+  // Parse JSON bodies before handling requests
+  app.use(express.json());
 
   app.get("/health", (_req: Request, res: Response) => {
     res.json({ status: "ok", server: "mcp-poc" });
   });
 
-  // Handle MCP requests using the new StreamableHTTP transport
-  app.use(express.json());
-
+  // Handle MCP requests using the StreamableHTTP transport
   app.post("/mcp", async (req: Request, res: Response) => {
     console.error("New MCP request received");
-    await transport.handleRequest(req, res, req.body);
+    console.error("Request body:", JSON.stringify(req.body, null, 2));
+
+    try {
+      // Create a new transport instance for each request
+      const transport = new StreamableHTTPServerTransport();
+
+      // Connect the server to the transport
+      await server.server.connect(transport);
+
+      // Handle the request
+      await transport.handleRequest(req, res, req.body);
+    } catch (error: any) {
+      console.error("Error handling MCP request:", error);
+      if (!res.headersSent) {
+        res.status(500).json({
+          error: "Internal server error",
+          message: error.message,
+          stack: error.stack
+        });
+      }
+    }
   });
 
   app.listen(PORT, HOST as string, () => {
