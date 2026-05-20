@@ -154,11 +154,22 @@ async function main() {
       // Create a new transport instance for each request
       const transport = new StreamableHTTPServerTransport();
 
-      // Connect the server to the transport
+      // Close any existing connection before connecting a new one
+      try {
+        await server.server.close();
+      } catch (closeError) {
+        // Ignore errors if not connected
+        console.error("Note: No existing connection to close");
+      }
+
+      // Connect the server to the new transport
       await server.server.connect(transport);
 
       // Handle the request
       await transport.handleRequest(req, res, req.body);
+
+      // Close the connection after handling the request
+      await server.server.close();
     } catch (error: any) {
       console.error("Error handling MCP request:", error);
       if (!res.headersSent) {
